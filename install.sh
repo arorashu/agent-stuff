@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options]
 
-Install this repository's skills using symlinks.
+Install this repository's skills and Pi extensions using symlinks.
 
 Options:
   --backup-existing  Move conflicting paths to timestamped backups
@@ -51,8 +51,10 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 shared_root="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
+pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
 skills=(async-monitor launch-agents mdl)
+extensions=(tps.ts work-timer.ts)
 
 run() {
   if "$dry_run"; then
@@ -78,10 +80,13 @@ same_target() {
 preflight() {
   local destination_root=$1
   local source_root=$2
+  local label=$3
+  shift 3
+  local names=("$@")
   local name source destination
   local conflicts=()
 
-  for name in "${skills[@]}"; do
+  for name in "${names[@]}"; do
     source="$source_root/$name"
     destination="$destination_root/$name"
 
@@ -95,7 +100,7 @@ preflight() {
   done
 
   if (("${#conflicts[@]}" > 0)) && ! "$backup_existing"; then
-    printf 'Refusing to replace existing skill paths:\n' >&2
+    printf 'Refusing to replace existing %s:\n' "$label" >&2
     printf '  %s\n' "${conflicts[@]}" >&2
     printf 'Rerun with --backup-existing to move them aside safely.\n' >&2
     return 1
@@ -195,12 +200,15 @@ migrate_codex_duplicates() {
 install_links() {
   local destination_root=$1
   local source_root=$2
+  local backup_directory=$3
+  shift 3
+  local names=("$@")
   local name source destination backup_root
   local prepared_backup=false
 
   run mkdir -p -- "$destination_root"
 
-  for name in "${skills[@]}"; do
+  for name in "${names[@]}"; do
     source="$source_root/$name"
     destination="$destination_root/$name"
 
@@ -210,7 +218,7 @@ install_links() {
     fi
 
     if [[ -e "$destination" || -L "$destination" ]]; then
-      backup_root="$(dirname -- "$destination_root")/skill-backups/$timestamp"
+      backup_root="$(dirname -- "$destination_root")/$backup_directory/$timestamp"
       if ! "$prepared_backup"; then
         run mkdir -p -- "$backup_root"
         prepared_backup=true
@@ -239,6 +247,13 @@ for name in "${skills[@]}"; do
   fi
 done
 
+for name in "${extensions[@]}"; do
+  if [[ ! -f "$repo_root/pi-extensions/$name" ]]; then
+    printf 'Missing Pi extension: %s\n' "$repo_root/pi-extensions/$name" >&2
+    exit 1
+  fi
+done
+
 install_pi=false
 case "$pi_mode" in
   always)
@@ -251,14 +266,16 @@ case "$pi_mode" in
     ;;
 esac
 
-preflight "$shared_root" "$repo_root/skills"
+preflight "$shared_root" "$repo_root/skills" "skill paths" "${skills[@]}"
 preflight_codex_duplicates
 if "$install_pi"; then
   preflight_pi
+  preflight "$pi_extensions_root" "$repo_root/pi-extensions" "Pi extension paths" "${extensions[@]}"
 fi
 
 migrate_codex_duplicates
-install_links "$shared_root" "$repo_root/skills"
+install_links "$shared_root" "$repo_root/skills" "skill-backups" "${skills[@]}"
 if "$install_pi"; then
-  install_links "$pi_root" "$shared_root"
+  install_links "$pi_root" "$shared_root" "skill-backups" "${skills[@]}"
+  install_links "$pi_extensions_root" "$repo_root/pi-extensions" "extension-backups" "${extensions[@]}"
 fi

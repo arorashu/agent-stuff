@@ -1,7 +1,7 @@
 # agent-stuff
 
-Small, reusable agent skills maintained in one repository and shared between
-Codex and Pi with symlinks.
+Small, reusable agent skills and Pi extensions maintained in one repository
+and shared with symlinks.
 
 ## Included skills
 
@@ -14,6 +14,13 @@ Codex and Pi with symlinks.
 This repository contains the agent instructions, not the external commands
 they describe.
 
+## Included Pi extensions
+
+| Extension | Purpose | Requirement |
+|---|---|---|
+| `tps` | Show current and session-average generation speed in Pi's footer | Pi's `@earendil-works` extension API |
+| `work-timer` | Show live and final agent work duration in Pi's footer | Pi's `@earendil-works` extension API |
+
 ## Install
 
 Clone the repository:
@@ -23,7 +30,7 @@ git clone https://github.com/arorashu/agent-stuff.git ~/Work/agent-stuff
 cd ~/Work/agent-stuff
 ```
 
-Install the skills:
+Install the skills and, when Pi is present, the Pi extensions:
 
 ```bash
 ./install.sh
@@ -34,24 +41,26 @@ The installer creates links like these:
 ```text
 ~/.agents/skills/<name>       -> <clone>/skills/<name>
 ~/.pi/agent/skills/<name>    -> ~/.agents/skills/<name>
+~/.pi/agent/extensions/<file> -> <clone>/pi-extensions/<file>
 ```
 
 Current Codex builds discover the common `~/.agents/skills` directory, so the
-installer does not create duplicate links under `~/.codex/skills`. Pi links
-are installed when `~/.pi/agent` already exists; use `--pi` to create them
-on a new Pi setup.
+installer does not create duplicate links under `~/.codex/skills`. Pi skill
+and extension links are installed when `~/.pi/agent` already exists; use
+`--pi` to create them on a new Pi setup.
 
 The installer refuses to replace existing files or links. It also detects
 same-named skills installed directly under `~/.codex/skills`, where they would
 duplicate the common copy. To migrate existing skill directories safely, move
-conflicts into timestamped sibling `skill-backups/...` directories:
+conflicts into timestamped sibling `skill-backups/...` or
+`extension-backups/...` directories:
 
 ```bash
 ./install.sh --backup-existing
 ```
 
-Backups stay outside every `skills/` directory so agents do not discover them
-as duplicate skills.
+Backups stay outside active `skills/` and `extensions/` directories so
+agents do not discover or load them.
 
 Preview either operation with `--dry-run`:
 
@@ -65,7 +74,7 @@ from the new location.
 ## Publication and safety notes
 
 Only user-maintained skill content is included. Codex system skills and
-Omarchy-managed links into `/usr/share/omarchy` are intentionally excluded:
+Omarchy-managed skills, themes, and extensions are intentionally excluded:
 their original packages should install and update them.
 
 The published files were checked for credentials, private keys, tokens,
@@ -73,4 +82,5 @@ machine-specific absolute home paths, session data, and generated
 authentication state. None are included. Some skills can launch commands or
 agents; installing a skill does not grant those commands additional authority.
 In particular, the public `launch-agents` guidance keeps Codex sandboxing on
-unless a user explicitly chooses otherwise.
+unless a user explicitly chooses otherwise. The included Pi extensions do not
+make network requests or execute shell commands.
