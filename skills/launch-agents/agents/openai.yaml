@@ -1,0 +1,4 @@
+interface:
+  display_name: "Launch Agents"
+  short_description: "Choose and launch managed, headless, or tmux agents"
+  default_prompt: "Use $launch-agents to choose and launch the right kind of delegated agent."
