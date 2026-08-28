@@ -41,12 +41,17 @@ installer does not create duplicate links under `~/.codex/skills`. Pi links
 are installed when `~/.pi/agent` already exists; use `--pi` to create them
 on a new Pi setup.
 
-The installer refuses to replace existing files or links. To migrate existing
-skill directories safely, move conflicts aside with timestamped names:
+The installer refuses to replace existing files or links. It also detects
+same-named skills installed directly under `~/.codex/skills`, where they would
+duplicate the common copy. To migrate existing skill directories safely, move
+conflicts into timestamped sibling `skill-backups/...` directories:
 
 ```bash
 ./install.sh --backup-existing
 ```
+
+Backups stay outside every `skills/` directory so agents do not discover them
+as duplicate skills.
 
 Preview either operation with `--dry-run`:
 

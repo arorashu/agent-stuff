@@ -49,6 +49,7 @@ done
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 shared_root="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
+codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 timestamp=$(date +%Y%m%d-%H%M%S)
 skills=(async-monitor launch-agents mdl)
@@ -101,10 +102,101 @@ preflight() {
   fi
 }
 
+link_points_to() {
+  local expected=$1
+  local destination=$2
+  local link_value link_path
+
+  [[ -L "$destination" ]] || return 1
+  link_value=$(readlink -- "$destination")
+  if [[ "$link_value" = /* ]]; then
+    link_path=$link_value
+  else
+    link_path="$(dirname -- "$destination")/$link_value"
+  fi
+
+  [[ "$(realpath -m -- "$link_path")" == "$(realpath -m -- "$expected")" ]]
+}
+
+preflight_pi() {
+  local name destination
+  local conflicts=()
+
+  for name in "${skills[@]}"; do
+    destination="$pi_root/$name"
+
+    if same_target "$repo_root/skills/$name" "$destination" ||
+      link_points_to "$shared_root/$name" "$destination"; then
+      continue
+    fi
+
+    if [[ -e "$destination" || -L "$destination" ]]; then
+      conflicts+=("$destination")
+    fi
+  done
+
+  if (("${#conflicts[@]}" > 0)) && ! "$backup_existing"; then
+    printf 'Refusing to replace existing Pi skill paths:\n' >&2
+    printf '  %s\n' "${conflicts[@]}" >&2
+    printf 'Rerun with --backup-existing to move them aside safely.\n' >&2
+    return 1
+  fi
+}
+
+preflight_codex_duplicates() {
+  local name destination
+  local conflicts=()
+
+  [[ "$(realpath -m -- "$codex_root")" == "$(realpath -m -- "$shared_root")" ]] &&
+    return 0
+
+  for name in "${skills[@]}"; do
+    destination="$codex_root/$name"
+    if [[ -e "$destination" || -L "$destination" ]]; then
+      conflicts+=("$destination")
+    fi
+  done
+
+  if (("${#conflicts[@]}" > 0)) && ! "$backup_existing"; then
+    printf 'Direct Codex copies would duplicate the shared skills:\n' >&2
+    printf '  %s\n' "${conflicts[@]}" >&2
+    printf 'Rerun with --backup-existing to move them aside safely.\n' >&2
+    return 1
+  fi
+}
+
+migrate_codex_duplicates() {
+  local name destination backup_root
+  local prepared=false
+
+  [[ "$(realpath -m -- "$codex_root")" == "$(realpath -m -- "$shared_root")" ]] &&
+    return 0
+
+  backup_root="$(dirname -- "$codex_root")/skill-backups/$timestamp"
+  for name in "${skills[@]}"; do
+    destination="$codex_root/$name"
+    if [[ ! -e "$destination" && ! -L "$destination" ]]; then
+      continue
+    fi
+
+    if ! "$prepared"; then
+      run mkdir -p -- "$backup_root"
+      prepared=true
+    fi
+    run mv -- "$destination" "$backup_root/$name"
+    if "$dry_run"; then
+      printf 'Would migrate duplicate: %s -> %s\n' "$destination" "$backup_root/$name"
+    else
+      printf 'Migrated duplicate: %s -> %s\n' "$destination" "$backup_root/$name"
+    fi
+  done
+}
+
 install_links() {
   local destination_root=$1
   local source_root=$2
-  local name source destination backup
+  local name source destination backup_root
+  local prepared_backup=false
 
   run mkdir -p -- "$destination_root"
 
@@ -118,8 +210,17 @@ install_links() {
     fi
 
     if [[ -e "$destination" || -L "$destination" ]]; then
-      backup="$destination.backup.$timestamp"
-      run mv -- "$destination" "$backup"
+      backup_root="$(dirname -- "$destination_root")/skill-backups/$timestamp"
+      if ! "$prepared_backup"; then
+        run mkdir -p -- "$backup_root"
+        prepared_backup=true
+      fi
+      run mv -- "$destination" "$backup_root/$name"
+      if "$dry_run"; then
+        printf 'Would back up: %s -> %s\n' "$destination" "$backup_root/$name"
+      else
+        printf 'Backed up: %s -> %s\n' "$destination" "$backup_root/$name"
+      fi
     fi
 
     run ln -s -- "$source" "$destination"
@@ -138,9 +239,6 @@ for name in "${skills[@]}"; do
   fi
 done
 
-preflight "$shared_root" "$repo_root/skills"
-install_links "$shared_root" "$repo_root/skills"
-
 install_pi=false
 case "$pi_mode" in
   always)
@@ -153,7 +251,14 @@ case "$pi_mode" in
     ;;
 esac
 
+preflight "$shared_root" "$repo_root/skills"
+preflight_codex_duplicates
 if "$install_pi"; then
-  preflight "$pi_root" "$shared_root"
+  preflight_pi
+fi
+
+migrate_codex_duplicates
+install_links "$shared_root" "$repo_root/skills"
+if "$install_pi"; then
   install_links "$pi_root" "$shared_root"
 fi
