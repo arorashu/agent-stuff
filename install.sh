@@ -53,7 +53,7 @@ codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
-skills=(async-monitor launch-agents mdl)
+skills=(async-monitor launch-agents)
 extensions=(tps.ts work-timer.ts)
 
 run() {

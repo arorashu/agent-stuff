@@ -9,7 +9,6 @@ and shared with symlinks.
 |---|---|---|
 | `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | Pi's `async_monitor` extension and/or a separately installed `codex-monitor` |
 | `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
-| `mdl` | Use the author's `mdl` workflow for YouTube format-140 M4A downloads | A separately installed `mdl` command and its uv-managed `yt-dlp` |
 
 This repository contains the agent instructions, not the external commands
 they describe.
