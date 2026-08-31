@@ -1,7 +1,7 @@
 # agent-stuff
 
 Small, reusable agent skills and Pi extensions maintained in one
-repository and shared.
+repository.
 
 ## Included skills
 
@@ -35,6 +35,9 @@ Install the skills and, when Pi is present, the Pi extensions:
 ./install.sh
 ```
 
+Only need one skill? Copy `skills/<name>` into `~/.agents/skills/` and
+skip the installer — the repository is not required afterwards.
+
 The installer creates links like these:
 
 ```text
@@ -48,18 +51,16 @@ installer does not create duplicate links under `~/.codex/skills`. Pi skill
 and extension links are installed when `~/.pi/agent` already exists; use
 `--pi` to create them on a new Pi setup.
 
-The installer refuses to replace existing files or links. It also detects
-same-named skills installed directly under `~/.codex/skills`, where they would
-duplicate the common copy. To migrate existing skill directories safely, move
-conflicts into timestamped sibling `skill-backups/...` or
-`extension-backups/...` directories:
+The installer never overwrites existing files or links. Conflicts —
+including same-named copies directly under `~/.codex/skills` — can be
+moved aside with:
 
 ```bash
 ./install.sh --backup-existing
 ```
 
-Backups stay outside active `skills/` and `extensions/` directories so
-agents do not discover or load them.
+Backups land in timestamped `skill-backups/` or `extension-backups/`
+siblings, outside the active directories, so agents ignore them.
 
 Preview either operation with `--dry-run`:
 
@@ -67,8 +68,8 @@ Preview either operation with `--dry-run`:
 ./install.sh --dry-run --backup-existing
 ```
 
-Moving the clone later breaks the repository-facing links; rerun the installer
-from the new location.
+Moving the clone later breaks the links the installer created; rerun the
+installer from the new location.
 
 ## Publication and safety notes
 
