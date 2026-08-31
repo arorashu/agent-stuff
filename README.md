@@ -38,6 +38,17 @@ Install the skills and, when Pi is present, the Pi extensions:
 Only need one skill? Copy `skills/<name>` into `~/.agents/skills/` and
 skip the installer — the repository is not required afterwards.
 
+The installer prints a plan of exactly what will be installed where and
+asks for confirmation before applying; pass `-y` to skip the prompt
+(required when not running in a terminal). Select a subset with
+`--skill`/`--extension`, or use make:
+
+```bash
+./install.sh --skill async-monitor -y
+make install SKILL=async-monitor
+make install-skill NAME=launch-agents
+```
+
 The installer creates links like these:
 
 ```text

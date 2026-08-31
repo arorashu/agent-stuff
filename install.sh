@@ -4,6 +4,9 @@ set -euo pipefail
 backup_existing=false
 dry_run=false
 pi_mode=auto
+assume_yes=false
+wanted_skills=()
+wanted_extensions=()
 
 usage() {
   cat <<'EOF'
@@ -14,8 +17,11 @@ Install this repository's skills and Pi extensions.
 Options:
   --backup-existing  Move conflicting paths to timestamped backups
   --dry-run          Print changes without making them
+  --skill NAME       Install only this skill (repeatable; default: all)
+  --extension NAME   Install only this extension (repeatable; default: all)
   --pi               Install Pi links even if ~/.pi/agent does not exist
   --no-pi            Do not install Pi links
+  -y, --yes          Apply without the confirmation prompt
   -h, --help         Show this help
 EOF
 }
@@ -33,6 +39,25 @@ while (($#)); do
       ;;
     --no-pi)
       pi_mode=never
+      ;;
+    -y|--yes)
+      assume_yes=true
+      ;;
+    --skill)
+      if (( $# < 2 )); then
+        printf 'Missing value for --skill\n' >&2
+        exit 2
+      fi
+      wanted_skills+=("$2")
+      shift
+      ;;
+    --extension)
+      if (( $# < 2 )); then
+        printf 'Missing value for --extension\n' >&2
+        exit 2
+      fi
+      wanted_extensions+=("$2")
+      shift
       ;;
     -h|--help)
       usage
@@ -53,8 +78,63 @@ codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
-skills=(async-monitor launch-agents)
-extensions=(tps.ts work-timer.ts)
+all_skills=(async-monitor launch-agents)
+all_extensions=(tps.ts work-timer.ts)
+
+for want in "${wanted_skills[@]}"; do
+  found=false
+  for name in "${all_skills[@]}"; do
+    [[ "$want" == "$name" ]] && found=true
+  done
+  if ! "$found"; then
+    printf 'Unknown skill: %s\nValid skills: %s\n' "$want" "${all_skills[*]}" >&2
+    exit 2
+  fi
+done
+
+for want in "${wanted_extensions[@]}"; do
+  found=false
+  for name in "${all_extensions[@]}"; do
+    [[ "$want" == "$name" ]] && found=true
+  done
+  if ! "$found"; then
+    printf 'Unknown extension: %s\nValid extensions: %s\n' "$want" "${all_extensions[*]}" >&2
+    exit 2
+  fi
+done
+
+selected_any=$(( ${#wanted_skills[@]} + ${#wanted_extensions[@]} ))
+
+if (( ${#wanted_skills[@]} > 0 )); then
+  skills=()
+  for name in "${all_skills[@]}"; do
+    for want in "${wanted_skills[@]}"; do
+      [[ "$want" == "$name" ]] && skills+=("$name")
+    done
+  done
+elif (( selected_any == 0 )); then
+  skills=("${all_skills[@]}")
+else
+  skills=()
+fi
+
+if (( ${#wanted_extensions[@]} > 0 )); then
+  extensions=()
+  for name in "${all_extensions[@]}"; do
+    for want in "${wanted_extensions[@]}"; do
+      [[ "$want" == "$name" ]] && extensions+=("$name")
+    done
+  done
+elif (( selected_any == 0 )); then
+  extensions=("${all_extensions[@]}")
+else
+  extensions=()
+fi
+
+if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )); then
+  printf 'Nothing selected to install.\n'
+  exit 0
+fi
 
 run() {
   if "$dry_run"; then
@@ -240,6 +320,87 @@ install_links() {
   done
 }
 
+plan_entry() {
+  local label=$1 name=$2 source=$3 destination=$4 backup_dir=$5
+  local backup_note=""
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    backup_note=" (existing will be backed up to $backup_dir/$name)"
+  fi
+  printf '  [install] %s %s\n' "$label" "$name"
+  printf '          %s -> %s%s\n' "$destination" "$source" "$backup_note"
+}
+
+show_plan() {
+  local name
+  local changes=0
+
+  printf 'Install plan:\n'
+  for name in "${skills[@]}"; do
+    if same_target "$repo_root/skills/$name" "$shared_root/$name"; then
+      printf '  [skip]    skill %s (already installed)\n' "$name"
+    else
+      changes=$((changes + 1))
+      plan_entry 'skill' "$name" "$repo_root/skills/$name" "$shared_root/$name" \
+        "$(dirname -- "$shared_root")/skill-backups/$timestamp"
+    fi
+  done
+
+  if "$install_pi"; then
+    for name in "${skills[@]}"; do
+      if same_target "$repo_root/skills/$name" "$pi_root/$name" ||
+        link_points_to "$shared_root/$name" "$pi_root/$name"; then
+        printf '  [skip]    pi skill %s (already installed)\n' "$name"
+      else
+        changes=$((changes + 1))
+        plan_entry 'pi skill' "$name" "$shared_root/$name" "$pi_root/$name" \
+          "$(dirname -- "$pi_root")/skill-backups/$timestamp"
+      fi
+    done
+    for name in "${extensions[@]}"; do
+      if same_target "$repo_root/pi-extensions/$name" "$pi_extensions_root/$name"; then
+        printf '  [skip]    extension %s (already installed)\n' "$name"
+      else
+        changes=$((changes + 1))
+        plan_entry 'extension' "$name" "$repo_root/pi-extensions/$name" "$pi_extensions_root/$name" \
+          "$(dirname -- "$pi_extensions_root")/extension-backups/$timestamp"
+      fi
+    done
+  fi
+
+  if [[ "$(realpath -m -- "$codex_root")" != "$(realpath -m -- "$shared_root")" ]]; then
+    for name in "${skills[@]}"; do
+      if [[ -e "$codex_root/$name" || -L "$codex_root/$name" ]]; then
+        changes=$((changes + 1))
+        printf '  [migrate] codex duplicate %s\n' "$name"
+        printf '          %s -> %s\n' "$codex_root/$name" \
+          "$(dirname -- "$codex_root")/skill-backups/$timestamp/$name"
+      fi
+    done
+  fi
+
+  if (( changes == 0 )); then
+    printf 'Nothing to do.\n'
+    return 1
+  fi
+  return 0
+}
+
+confirm() {
+  if "$dry_run" || "$assume_yes"; then
+    return
+  fi
+  if [[ ! -t 0 ]]; then
+    printf 'Not a terminal; nothing will be changed. Re-run with -y to apply.\n' >&2
+    exit 2
+  fi
+  local answer
+  read -r -p 'Proceed? [y/N] ' answer
+  case "$answer" in
+    y|Y|yes|YES) return ;;
+    *) printf 'Aborted; nothing changed.\n'; exit 0 ;;
+  esac
+}
+
 for name in "${skills[@]}"; do
   if [[ ! -f "$repo_root/skills/$name/SKILL.md" ]]; then
     printf 'Missing skill entrypoint: %s\n' "$repo_root/skills/$name/SKILL.md" >&2
@@ -272,6 +433,9 @@ if "$install_pi"; then
   preflight_pi
   preflight "$pi_extensions_root" "$repo_root/pi-extensions" "Pi extension paths" "${extensions[@]}"
 fi
+
+show_plan || exit 0
+confirm
 
 migrate_codex_duplicates
 install_links "$shared_root" "$repo_root/skills" "skill-backups" "${skills[@]}"
