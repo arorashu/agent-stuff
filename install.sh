@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options]
 
-Install this repository's skills and Pi extensions using symlinks.
+Install this repository's skills and Pi extensions.
 
 Options:
   --backup-existing  Move conflicting paths to timestamped backups

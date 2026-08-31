@@ -1,7 +1,7 @@
 # agent-stuff
 
-Small, reusable agent skills and Pi extensions maintained in one repository
-and shared with symlinks.
+Small, reusable agent skills and Pi extensions maintained in one
+repository and shared.
 
 ## Included skills
 
