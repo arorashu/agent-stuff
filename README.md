@@ -40,7 +40,8 @@ skip the installer — the repository is not required afterwards.
 
 The installer prints a plan of exactly what will be installed where and
 asks for confirmation before applying; pass `-y` to skip the prompt
-(required when not running in a terminal). With no `--skill`/`--extension`
+(required to apply when stdin is not a terminal; `--dry-run` and no-op runs
+need no prompt). With no `--skill`/`--extension`
 everything is installed; if any selector is given, only the explicitly
 named items are installed. Selectors may be combined and repeated. The
 same selection works via make (`make help` documents the variables):

@@ -147,10 +147,6 @@ if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )); then
   exit 0
 fi
 
-run() {
-  "$@"
-}
-
 same_target() {
   local source=$1
   local destination=$2
@@ -270,10 +266,10 @@ migrate_codex_duplicates() {
     fi
 
     if ! "$prepared"; then
-      run mkdir -p -- "$backup_root"
+      mkdir -p -- "$backup_root"
       prepared=true
     fi
-    run mv -- "$destination" "$backup_root/$name"
+    mv -- "$destination" "$backup_root/$name"
     printf 'Migrated duplicate: %s -> %s\n' "$destination" "$backup_root/$name"
   done
 }
@@ -287,7 +283,7 @@ install_links() {
   local name source destination backup_root
   local prepared_backup=false
 
-  run mkdir -p -- "$destination_root"
+  mkdir -p -- "$destination_root"
 
   for name in "${names[@]}"; do
     source="$source_root/$name"
@@ -301,14 +297,14 @@ install_links() {
     if [[ -e "$destination" || -L "$destination" ]]; then
       backup_root="$(dirname -- "$destination_root")/$backup_directory/$timestamp"
       if ! "$prepared_backup"; then
-        run mkdir -p -- "$backup_root"
+        mkdir -p -- "$backup_root"
         prepared_backup=true
       fi
-      run mv -- "$destination" "$backup_root/$name"
+      mv -- "$destination" "$backup_root/$name"
       printf 'Backed up: %s -> %s\n' "$destination" "$backup_root/$name"
     fi
 
-    run ln -s -- "$source" "$destination"
+    ln -s -- "$source" "$destination"
     printf 'Installed: %s -> %s\n' "$destination" "$source"
   done
 }
@@ -379,7 +375,7 @@ show_plan() {
 }
 
 confirm() {
-  if "$dry_run" || "$assume_yes"; then
+  if "$assume_yes"; then
     return
   fi
   if [[ ! -t 0 ]]; then

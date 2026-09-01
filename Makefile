@@ -29,7 +29,8 @@ help:
 		'  BACKUP=1          Back up conflicting paths instead of refusing' \
 		'  DRY=1             Print the plan without applying' \
 		'  YES=1             Skip the confirmation prompt (same as install.sh -y)' \
-		'  ARGS              Forwarded verbatim to install.sh and validated there,' \
+		'  ARGS              Appended to the install.sh command as shell arguments'
+		'                    (trusted flag strings; validated there),' \
 		'                    e.g. ARGS="--dry-run -y"' \
 		'' \
 		'Conventions:' \
