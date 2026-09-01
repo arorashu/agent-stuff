@@ -16,13 +16,24 @@ Install this repository's skills and Pi extensions.
 
 Options:
   --backup-existing  Move conflicting paths to timestamped backups
-  --dry-run          Print changes without making them
-  --skill NAME       Install only this skill (repeatable; default: all)
-  --extension NAME   Install only this extension (repeatable; default: all)
+  --dry-run          Print the plan and exit without making changes
+  --skill NAME       Select this skill (repeatable)
+  --extension NAME   Select this extension (repeatable)
   --pi               Install Pi links even if ~/.pi/agent does not exist
   --no-pi            Do not install Pi links
   -y, --yes          Apply without the confirmation prompt
   -h, --help         Show this help
+
+Selection:
+  With no --skill/--extension, all skills and extensions are installed.
+  If any selector is given, only the explicitly named items are
+  installed; selectors may be combined and repeated.
+
+Exit codes:
+  0  applied, dry-run completed, no-op, or user declined
+  1  operational failure (conflict without --backup-existing, or
+     confirmation unavailable on non-terminal stdin)
+  2  invocation error (unknown option or item, missing argument)
 EOF
 }
 
@@ -137,13 +148,7 @@ if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )); then
 fi
 
 run() {
-  if "$dry_run"; then
-    printf 'DRY RUN:'
-    printf ' %q' "$@"
-    printf '\n'
-  else
-    "$@"
-  fi
+  "$@"
 }
 
 same_target() {
@@ -269,11 +274,7 @@ migrate_codex_duplicates() {
       prepared=true
     fi
     run mv -- "$destination" "$backup_root/$name"
-    if "$dry_run"; then
-      printf 'Would migrate duplicate: %s -> %s\n' "$destination" "$backup_root/$name"
-    else
-      printf 'Migrated duplicate: %s -> %s\n' "$destination" "$backup_root/$name"
-    fi
+    printf 'Migrated duplicate: %s -> %s\n' "$destination" "$backup_root/$name"
   done
 }
 
@@ -304,19 +305,11 @@ install_links() {
         prepared_backup=true
       fi
       run mv -- "$destination" "$backup_root/$name"
-      if "$dry_run"; then
-        printf 'Would back up: %s -> %s\n' "$destination" "$backup_root/$name"
-      else
-        printf 'Backed up: %s -> %s\n' "$destination" "$backup_root/$name"
-      fi
+      printf 'Backed up: %s -> %s\n' "$destination" "$backup_root/$name"
     fi
 
     run ln -s -- "$source" "$destination"
-    if "$dry_run"; then
-      printf 'Would install: %s -> %s\n' "$destination" "$source"
-    else
-      printf 'Installed: %s -> %s\n' "$destination" "$source"
-    fi
+    printf 'Installed: %s -> %s\n' "$destination" "$source"
   done
 }
 
@@ -390,8 +383,8 @@ confirm() {
     return
   fi
   if [[ ! -t 0 ]]; then
-    printf 'Not a terminal; nothing will be changed. Re-run with -y to apply.\n' >&2
-    exit 2
+    printf 'Cannot confirm because stdin is not a terminal; re-run with -y to apply.\n' >&2
+    exit 1
   fi
   local answer
   read -r -p 'Proceed? [y/N] ' answer
@@ -435,6 +428,9 @@ if "$install_pi"; then
 fi
 
 show_plan || exit 0
+if "$dry_run"; then
+  exit 0
+fi
 confirm
 
 migrate_codex_duplicates

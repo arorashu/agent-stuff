@@ -40,14 +40,22 @@ skip the installer — the repository is not required afterwards.
 
 The installer prints a plan of exactly what will be installed where and
 asks for confirmation before applying; pass `-y` to skip the prompt
-(required when not running in a terminal). Select a subset with
-`--skill`/`--extension`, or use make:
+(required when not running in a terminal). With no `--skill`/`--extension`
+everything is installed; if any selector is given, only the explicitly
+named items are installed. Selectors may be combined and repeated. The
+same selection works via make (`make help` documents the variables):
 
 ```bash
 ./install.sh --skill async-monitor -y
 make install SKILL=async-monitor
+make install SKILL="async-monitor launch-agents"
 make install-skill NAME=launch-agents
+make install SKILL=async-monitor ARGS="--dry-run"
 ```
+
+Exit codes: 0 applied/no-op/declined, 1 operational failure (e.g. a
+conflict without `--backup-existing`, or confirmation unavailable on
+non-terminal stdin), 2 invocation error (unknown option or item).
 
 The installer creates links like these:
 
