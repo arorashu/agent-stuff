@@ -58,6 +58,9 @@ Exit codes: 0 applied/no-op/declined, 1 operational failure (e.g. a
 conflict without `--backup-existing`, or confirmation unavailable on
 non-terminal stdin), 2 invocation error (unknown option or item).
 
+Testing: `make test` runs a hermetic suite (isolated temp dirs; never
+touches real agent directories).
+
 The installer creates links like these:
 
 ```text
