@@ -1,109 +1,131 @@
 # agent-stuff
 
-Small, reusable agent skills and Pi extensions maintained in one
-repository.
+Reusable agent skills and Pi extensions in one repository.
 
-## Included skills
+This repository holds the skill instructions and extension code. It does
+not install the external CLIs those skills describe.
+
+## Skills
 
 | Skill | Purpose | External dependency |
 |---|---|---|
+| `article-html` | Turn a public web article into a self-contained reader HTML file with no banners or subscribe chrome | Network fetch (Jina reader first); clipboard `wl-paste` on this machine |
 | `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | Pi's `async_monitor` extension and/or a separately installed `codex-monitor` |
 | `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
 
-This repository contains the agent instructions, not the external commands
-they describe.
-
-## Included Pi extensions
+## Pi extensions
 
 | Extension | Purpose | Requirement |
 |---|---|---|
-| `tps` | Show current and session-average generation speed in Pi's footer | Pi's `@earendil-works` extension API |
-| `work-timer` | Show live and final agent work duration in Pi's footer | Pi's `@earendil-works` extension API |
+| `pi-deepseek-websearch` | Register a `deepseek_search` tool that runs DeepSeek's server-side web search | DeepSeek key (`/login` or `DEEPSEEK_API_KEY`); Pi |
+| `tps` | Show current and session-average generation speed in Pi's footer | Pi |
+| `work-timer` | Show live and final agent work duration in Pi's footer | Pi |
 
-## Install
+`pi-deepseek-websearch` is a directory (`index.ts` entrypoint). `tps` and
+`work-timer` are single files. The installer accepts both.
 
-Clone the repository:
+## Install everything
 
 ```bash
 git clone https://github.com/arorashu/agent-stuff.git ~/Work/agent-stuff
 cd ~/Work/agent-stuff
-```
-
-Install the skills and, when Pi is present, the Pi extensions:
-
-```bash
 ./install.sh
 ```
 
-Only need one skill? Copy `skills/<name>` into `~/.agents/skills/` and
-skip the installer — the repository is not required afterwards.
+The installer prints a plan of what will be linked where and asks for
+confirmation. Pass `-y` to skip the prompt (required when stdin is not a
+terminal). `--dry-run` prints the plan and makes no changes.
 
-The installer prints a plan of exactly what will be installed where and
-asks for confirmation before applying; pass `-y` to skip the prompt
-(required to apply when stdin is not a terminal; `--dry-run` and no-op runs
-need no prompt). With no `--skill`/`--extension`
-everything is installed; if any selector is given, only the explicitly
-named items are installed. Selectors may be combined and repeated. The
-same selection works via make (`make help` documents the variables):
+With no `--skill` / `--extension`, every skill and extension is installed.
+
+Pi skill and extension links are created when `~/.pi/agent` already exists.
+Use `--pi` to create them on a new Pi setup, or `--no-pi` to skip Pi.
+
+## Install only some items
+
+You can copy files, or you can ask the installer for specific names.
+They do different things.
+
+### Copy (no clone needed afterwards)
+
+The repository is only a source of files. After the copy, you can delete
+it. Updates are manual.
+
+One skill:
 
 ```bash
-./install.sh --skill async-monitor -y
-make install SKILL=async-monitor
+mkdir -p ~/.agents/skills
+cp -r skills/article-html ~/.agents/skills/article-html
+```
+
+One Pi extension (Pi must already exist):
+
+```bash
+mkdir -p ~/.pi/agent/extensions
+cp pi-extensions/tps.ts ~/.pi/agent/extensions/tps.ts
+cp -r pi-extensions/pi-deepseek-websearch ~/.pi/agent/extensions/pi-deepseek-websearch
+```
+
+Optional Pi skill link after a shared-skill copy:
+
+```bash
+mkdir -p ~/.pi/agent/skills
+ln -s ~/.agents/skills/article-html ~/.pi/agent/skills/article-html
+```
+
+### Installer, specific names (symlink into this clone)
+
+The installer links into the clone. `git pull` in the clone updates the
+linked files. Moving the clone later breaks the links; rerun the installer
+from the new path.
+
+If you pass any `--skill` or `--extension`, **only** the named items are
+installed. You can combine and repeat selectors.
+
+```bash
+./install.sh --skill article-html
+./install.sh --skill async-monitor --skill launch-agents
+./install.sh --extension tps.ts
+./install.sh --extension pi-deepseek-websearch
+./install.sh --skill article-html --extension work-timer.ts -y
+```
+
+Make does the same selection (`make help` lists the variables):
+
+```bash
+make install SKILL=article-html
 make install SKILL="async-monitor launch-agents"
+make install EXTENSION=tps.ts
+make install EXTENSION=pi-deepseek-websearch
 make install-skill NAME=launch-agents
+make install-extension NAME=tps.ts
 make install SKILL=async-monitor ARGS="--dry-run"
 ```
 
-Exit codes: 0 applied/no-op/declined, 1 operational failure (e.g. a
-conflict without `--backup-existing`, or confirmation unavailable on
-non-terminal stdin), 2 invocation error (unknown option or item).
-
-Testing: `make test` runs a hermetic suite (isolated temp dirs; never
-touches real agent directories).
-
-The installer creates links like these:
+## What the installer links
 
 ```text
-~/.agents/skills/<name>       -> <clone>/skills/<name>
-~/.pi/agent/skills/<name>    -> ~/.agents/skills/<name>
-~/.pi/agent/extensions/<file> -> <clone>/pi-extensions/<file>
+~/.agents/skills/<name>        -> <clone>/skills/<name>
+~/.pi/agent/skills/<name>      -> ~/.agents/skills/<name>
+~/.pi/agent/extensions/<name>  -> <clone>/pi-extensions/<name>
 ```
 
-Current Codex builds discover the common `~/.agents/skills` directory, so the
-installer does not create duplicate links under `~/.codex/skills`. Pi skill
-and extension links are installed when `~/.pi/agent` already exists; use
-`--pi` to create them on a new Pi setup.
+Current Codex builds discover `~/.agents/skills`, so the installer does
+not also link under `~/.codex/skills`.
 
 The installer never overwrites existing files or links. Conflicts —
-including same-named copies directly under `~/.codex/skills` — can be
-moved aside with:
+including same-named copies under `~/.codex/skills` — can be moved aside
+with `--backup-existing`. Backups go to timestamped `skill-backups/` or
+`extension-backups/` siblings, outside the active directories.
 
 ```bash
 ./install.sh --backup-existing
-```
-
-Backups land in timestamped `skill-backups/` or `extension-backups/`
-siblings, outside the active directories, so agents ignore them.
-
-Preview either operation with `--dry-run`:
-
-```bash
 ./install.sh --dry-run --backup-existing
 ```
 
-Moving the clone later breaks the links the installer created; rerun the
-installer from the new location.
+Exit codes: `0` applied / no-op / declined / dry-run; `1` operational
+failure (conflict without `--backup-existing`, or confirmation needed on
+non-terminal stdin); `2` invocation error (unknown option or item).
 
-## Publication and safety notes
-
-Only user-maintained skill content is included. Codex system skills and
-Omarchy-managed skills, themes, and extensions are intentionally excluded:
-their original packages should install and update them.
-
-The published files were checked for credentials, private keys, tokens,
-machine-specific absolute home paths, session data, and generated
-authentication state. None are included. Some skills can launch commands or
-agents; installing a skill does not grant those commands additional authority.
-In particular, the public `launch-agents` guidance keeps Codex sandboxing on
-unless a user explicitly chooses otherwise. The included Pi extensions do not
-make network requests or execute shell commands.
+`make test` runs a hermetic suite in temp directories. It never touches
+real agent directories.

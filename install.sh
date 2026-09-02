@@ -89,8 +89,8 @@ codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
-all_skills=(async-monitor launch-agents)
-all_extensions=(tps.ts work-timer.ts)
+all_skills=(article-html async-monitor launch-agents)
+all_extensions=(pi-deepseek-websearch tps.ts work-timer.ts)
 
 for want in "${wanted_skills[@]}"; do
   found=false
@@ -398,10 +398,12 @@ for name in "${skills[@]}"; do
 done
 
 for name in "${extensions[@]}"; do
-  if [[ ! -f "$repo_root/pi-extensions/$name" ]]; then
-    printf 'Missing Pi extension: %s\n' "$repo_root/pi-extensions/$name" >&2
-    exit 1
+  source="$repo_root/pi-extensions/$name"
+  if [[ -f "$source" || -f "$source/index.ts" ]]; then
+    continue
   fi
+  printf 'Missing Pi extension: %s\n' "$source" >&2
+  exit 1
 done
 
 install_pi=false

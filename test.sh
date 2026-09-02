@@ -15,8 +15,8 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$repo_root"
 
 # Explicit expected inventory. Update when adding installable items.
-skills=(async-monitor launch-agents)
-extensions=(tps.ts work-timer.ts)
+skills=(article-html async-monitor launch-agents)
+extensions=(pi-deepseek-websearch tps.ts work-timer.ts)
 
 workspace() {
   local d=$1
@@ -119,7 +119,7 @@ no_mutation "non-interactive abort leaves destination trees empty" "$tmp/w1/agen
 out=$(./install.sh --skill bogus -y 2>&1)
 rc=$?
 if [[ "$rc" == 2 ]] && grep -q 'Unknown skill: bogus' <<<"$out" \
-  && grep -q 'Valid skills: async-monitor launch-agents' <<<"$out"; then
+  && grep -q 'Valid skills: article-html async-monitor launch-agents' <<<"$out"; then
   ok "unknown skill rejected with valid list"
 else
   bad "unknown skill rejection (rc=$rc)"
