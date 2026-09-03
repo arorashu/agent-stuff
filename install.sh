@@ -90,7 +90,7 @@ pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
 all_skills=(article-html async-monitor launch-agents)
-all_extensions=(pi-deepseek-websearch tps.ts work-timer.ts)
+all_extensions=(async-monitor pi-deepseek-websearch tps.ts work-timer.ts)
 
 for want in "${wanted_skills[@]}"; do
   found=false

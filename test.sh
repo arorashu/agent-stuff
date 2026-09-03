@@ -16,7 +16,7 @@ cd "$repo_root"
 
 # Explicit expected inventory. Update when adding installable items.
 skills=(article-html async-monitor launch-agents)
-extensions=(pi-deepseek-websearch tps.ts work-timer.ts)
+extensions=(async-monitor pi-deepseek-websearch tps.ts work-timer.ts)
 
 workspace() {
   local d=$1
@@ -93,6 +93,7 @@ plan_count=$(grep -c 'Install plan:' <<<"$out")
 if [[ "$rc" == 0 && "$plan_count" == 1 ]] \
   && grep -q 'skill async-monitor' <<<"$out" \
   && grep -q 'pi skill launch-agents' <<<"$out" \
+  && grep -q 'extension async-monitor' <<<"$out" \
   && grep -q 'extension tps.ts' <<<"$out"; then
   ok "dry-run prints exactly one plan"
 else

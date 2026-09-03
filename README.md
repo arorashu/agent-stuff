@@ -10,19 +10,21 @@ not install the external CLIs those skills describe.
 | Skill | Purpose | External dependency |
 |---|---|---|
 | `article-html` | Turn a public web article into a self-contained reader HTML file with no banners or subscribe chrome | Network fetch (Jina reader first); clipboard `wl-paste` on this machine |
-| `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | Pi's `async_monitor` extension and/or a separately installed `codex-monitor` |
+| `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | This repository's `async-monitor` Pi extension and/or a separately installed `codex-monitor` |
 | `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
 
 ## Pi extensions
 
 | Extension | Purpose | Requirement |
 |---|---|---|
+| `async-monitor` | Run durable commands, polling checks, and detached Pi tasks with automatic session delivery | Node.js; Pi |
 | `pi-deepseek-websearch` | Register a `deepseek_search` tool that runs DeepSeek's server-side web search | DeepSeek key (`/login` or `DEEPSEEK_API_KEY`); Pi |
 | `tps` | Show current and session-average generation speed in Pi's footer | Pi |
 | `work-timer` | Show live and final agent work duration in Pi's footer | Pi |
 
-`pi-deepseek-websearch` is a directory (`index.ts` entrypoint). `tps` and
-`work-timer` are single files. The installer accepts both.
+`async-monitor` and `pi-deepseek-websearch` are directories (`index.ts`
+entrypoints). `tps` and `work-timer` are single files. The installer accepts
+both forms.
 
 ## Install everything
 
@@ -62,6 +64,7 @@ One Pi extension (Pi must already exist):
 
 ```bash
 mkdir -p ~/.pi/agent/extensions
+cp -r pi-extensions/async-monitor ~/.pi/agent/extensions/async-monitor
 cp pi-extensions/tps.ts ~/.pi/agent/extensions/tps.ts
 cp -r pi-extensions/pi-deepseek-websearch ~/.pi/agent/extensions/pi-deepseek-websearch
 ```
@@ -86,6 +89,7 @@ installed. You can combine and repeat selectors.
 ./install.sh --skill article-html
 ./install.sh --skill async-monitor --skill launch-agents
 ./install.sh --extension tps.ts
+./install.sh --extension async-monitor
 ./install.sh --extension pi-deepseek-websearch
 ./install.sh --skill article-html --extension work-timer.ts -y
 ```

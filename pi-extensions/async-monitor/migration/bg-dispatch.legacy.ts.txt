@@ -1,0 +1,108 @@
+/**
+ * bg-dispatch.ts — Orchestrator extension for async pi -p background tasks
+ *
+ * Command: /dispatch <task>
+ *   Spawns "pi -p --no-extensions --model deepseek-v4-flash --thinking off",
+ *   pipes task to stdin, returns immediately.
+ *
+ * Watcher: /tmp/pi-result.txt
+ *   Uses fs.watchFile (path-based, survives file deletion/recreation) so
+ *   external cleanup doesn't break the watcher.
+ */
+
+import * as fs from "node:fs";
+import { spawn } from "node:child_process";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const RESULT_FILE = "/tmp/pi-result.txt";
+const WORKER_MODEL = "deepseek/deepseek-v4-flash";
+
+function notifyOSC777(title: string, body: string): void {
+  process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
+}
+
+export default function (pi: ExtensionAPI) {
+  // ── Command: /dispatch <task> ──
+  pi.registerCommand("dispatch", {
+    description: "Dispatch a task to pi -p in the background. Returns immediately; you will be notified when done.",
+    handler: async (args, ctx) => {
+      const task = args.trim();
+      if (!task) {
+        ctx.ui.notify("Usage: /dispatch <task>", "warning");
+        return;
+      }
+
+      const taskId = Date.now().toString(36);
+      try { fs.writeFileSync(RESULT_FILE, ""); } catch {}
+
+      const child = spawn(
+        "pi",
+        ["-p", "--no-extensions", "--model", WORKER_MODEL, "--thinking", "off"],
+        {
+          detached: true,
+          stdio: ["pipe", "pipe", "pipe"],
+          cwd: process.cwd(),
+        },
+      );
+
+      child.stdin.write(task);
+      child.stdin.end();
+
+      let output = "";
+      child.stdout.on("data", (d: Buffer) => { output += d.toString(); });
+      child.stderr.on("data", (d: Buffer) => { output += d.toString(); });
+
+      child.on("close", () => {
+        const payload = JSON.stringify({ taskId, result: output.trim(), completedAt: Date.now() });
+        fs.writeFileSync(RESULT_FILE, payload);
+      });
+
+      child.on("error", (err) => {
+        const payload = JSON.stringify({ taskId, result: `Error: ${err.message}`, completedAt: Date.now() });
+        fs.writeFileSync(RESULT_FILE, payload);
+      });
+
+      child.unref();
+
+      ctx.ui.notify(`Task dispatched [${taskId}]`, "info");
+    },
+  });
+
+  // ── Async watcher for worker results (path-based, robust) ──
+  pi.on("session_start", async (_event, ctx) => {
+    try { fs.writeFileSync(RESULT_FILE, "", { flag: "wx" }); } catch {}
+
+    let lastMtimeMs = 0;
+    try { lastMtimeMs = fs.statSync(RESULT_FILE).mtimeMs; } catch {}
+
+    fs.watchFile(RESULT_FILE, { interval: 200 }, (curr) => {
+      if (!curr.isFile()) return;
+      if (curr.mtimeMs === lastMtimeMs) return;
+      lastMtimeMs = curr.mtimeMs;
+
+      try {
+        const raw = fs.readFileSync(RESULT_FILE, "utf-8").trim();
+        if (!raw) return;
+        fs.writeFileSync(RESULT_FILE, "");
+
+        let parsed: any;
+        try { parsed = JSON.parse(raw); } catch { parsed = { result: raw }; }
+
+        pi.sendMessage(
+          {
+            customType: "bg-result",
+            content: `Background task completed [${parsed.taskId || "unknown"}]:\n\n${parsed.result || raw}`,
+            display: true,
+          },
+          { triggerTurn: true },
+        );
+      } catch (err: any) {
+        console.error(`[bg-dispatch] watcher error: ${err.message}`);
+      }
+    });
+
+    if (ctx.hasUI) ctx.ui.notify("bg-dispatch: ready. Use /dispatch <task>", "info");
+  });
+
+  pi.on("agent_end", () => notifyOSC777("pi", "Ready"));
+}
