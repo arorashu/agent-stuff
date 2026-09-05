@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -109,15 +109,21 @@ describe("exclusive durable commits", () => {
 });
 
 describe("delivery claims", () => {
-	test("allows one claimant and persists delivery", async () => {
+	test("allows one claimant and persists delivery once", async () => {
 		const store = await root();
 		const data = metadata(store);
 		const dir = await createJob(data, store);
+		const path = deliveryPath(dir, "session-a");
 		expect(await claimDelivery(dir, "session-a", "one")).toBe(true);
 		expect(await claimDelivery(dir, "session-a", "two")).toBe(false);
-		await markDelivered(dir, "session-a", "one");
+		expect(await markDelivered(dir, "session-a", "one")).toBe(true);
+		const delivered = await readJson<any>(path);
+		const inode = (await stat(path)).ino;
+		expect(await markDelivered(dir, "session-a", "two")).toBe(false);
+		expect(await stat(path)).toMatchObject({ ino: inode });
+		expect(await readJson<any>(path)).toEqual(delivered);
 		expect(await claimDelivery(dir, "session-a", "one")).toBe(false);
-		expect((await readJson<any>(deliveryPath(dir, "session-a")))?.state).toBe("delivered");
+		expect(delivered?.state).toBe("delivered");
 	});
 
 	test("reclaims a stale claim only from a different extension instance", async () => {

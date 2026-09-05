@@ -383,12 +383,6 @@ async function cancelJob(job: JobSnapshot): Promise<string> {
 	return `Cancellation requested for ${job.metadata.id}.`;
 }
 
-function sessionContainsDelivery(ctx: ExtensionContext, jobId: string): boolean {
-	return ctx.sessionManager.getEntries().some((entry: any) =>
-		entry.type === "custom_message" && entry.customType === MESSAGE_TYPE && entry.details?.jobId === jobId,
-	);
-}
-
 function updateStatus(ctx: ExtensionContext, jobs: JobSnapshot[]): void {
 	if (!ctx.hasUI) return;
 	const active = jobs.filter((job) => job.status === "running" || job.status === "starting").length;
@@ -410,6 +404,25 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 	let polling = false;
 	let active = false;
 	let sessionId = "";
+	let pollingGeneration = 0;
+	let scannedEntryCount = 0;
+	const sessionDeliveries = new Set<string>();
+	const confirmedDeliveries = new Set<string>();
+
+	const refreshSessionDeliveries = (ctx: ExtensionContext) => {
+		const entries = ctx.sessionManager.getEntries();
+		if (entries.length < scannedEntryCount) {
+			scannedEntryCount = 0;
+			sessionDeliveries.clear();
+		}
+		for (let index = scannedEntryCount; index < entries.length; index++) {
+			const entry: any = entries[index];
+			if (entry.type === "custom_message" && entry.customType === MESSAGE_TYPE && typeof entry.details?.jobId === "string") {
+				sessionDeliveries.add(entry.details.jobId);
+			}
+		}
+		scannedEntryCount = entries.length;
+	};
 
 	const persistStarted = (job: JobSnapshot) => {
 		pi.appendEntry(START_ENTRY_TYPE, {
@@ -420,20 +433,34 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	const armPolling = (ctx: ExtensionContext) => {
+		pollingGeneration++;
+		if (!active || timer) return;
+		timer = setInterval(() => void poll(ctx), POLL_MS);
+	};
+
 	const poll = async (ctx: ExtensionContext) => {
 		if (!active || polling) return;
 		polling = true;
+		const generation = pollingGeneration;
 		try {
 			const jobs = await listJobs();
 			if (!active) return;
-			updateStatus(ctx, jobs.filter((job) => job.metadata.cwd === ctx.cwd));
-			if (!ctx.hasUI) return;
+			const sessionJobs = jobs.filter((job) => job.metadata.subscribers.includes(sessionId));
+			updateStatus(ctx, sessionJobs);
+			if (!ctx.hasUI) {
+				if (timer) { clearInterval(timer); timer = undefined; }
+				return;
+			}
+			refreshSessionDeliveries(ctx);
 
-			for (const job of jobs) {
+			for (const job of sessionJobs) {
 				if (!active || job.acknowledged || ["running", "starting"].includes(job.status)) continue;
-				if (!job.metadata.subscribers.includes(sessionId)) continue;
-				if (sessionContainsDelivery(ctx, job.metadata.id)) {
-					await markDelivered(job.dir, sessionId, instanceId);
+				if (sessionDeliveries.has(job.metadata.id)) {
+					if (!confirmedDeliveries.has(job.metadata.id)) {
+						await markDelivered(job.dir, sessionId, instanceId);
+						confirmedDeliveries.add(job.metadata.id);
+					}
 					continue;
 				}
 				if (!(await claimDelivery(job.dir, sessionId, instanceId))) continue;
@@ -457,6 +484,10 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 				await removeStaleDeliveryFiles(job.dir);
 				ctx.ui.notify(`Async job ${job.status}: ${job.metadata.label} [${job.metadata.id}]`, job.status === "completed" ? "info" : "warning");
 			}
+			const pending = sessionJobs.some((job) =>
+				!job.acknowledged && (["running", "starting"].includes(job.status) || !confirmedDeliveries.has(job.metadata.id)),
+			);
+			if (!pending && generation === pollingGeneration && timer) { clearInterval(timer); timer = undefined; }
 		} catch (error) {
 			console.error("[async-monitor] poll failed:", error);
 			try {
@@ -479,12 +510,15 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 		try {
 			active = true;
 			sessionId = ctx.sessionManager.getSessionId();
+			scannedEntryCount = 0;
+			sessionDeliveries.clear();
+			confirmedDeliveries.clear();
 			// Register the interval BEFORE the (async) initial poll so a
 			// session_shutdown that lands during the poll still clears it; the
 			// catch below covers the dispose-without-shutdown race (web app):
 			// a session that dies mid-handler must not leave a poll running.
 			if (timer) { clearInterval(timer); timer = undefined; }
-			timer = setInterval(() => void poll(ctx), POLL_MS);
+			armPolling(ctx);
 			await poll(ctx);
 		} catch (error) {
 			// The session was replaced/disposed while this handler was in flight
@@ -549,24 +583,28 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 					if (!params.command) throw new Error("async_monitor start requires command");
 					const job = await startCommand(ctx, "check", params.command, params);
 					persistStarted(job);
+					armPolling(ctx);
 					return textContent(`Polling condition registered.\n${formatJobLine(job)}\nSpool: ${job.dir}`, { action: "start", job });
 				}
 				case "run": {
 					if (!params.command) throw new Error("async_monitor run requires command");
 					const job = await startCommand(ctx, "run", params.command, params);
 					persistStarted(job);
+					armPolling(ctx);
 					return textContent(`Durable command started.\n${formatJobLine(job)}\nSpool: ${job.dir}`, { action: "run", job });
 				}
 				case "dispatch": {
 					if (!params.prompt) throw new Error("async_monitor dispatch requires prompt");
 					const job = await startDispatch(ctx, params.prompt, params);
 					persistStarted(job);
+					armPolling(ctx);
 					return textContent(`Durable Pi task dispatched.\n${formatJobLine(job)}\nSpool: ${job.dir}`, { action: "dispatch", job });
 				}
 				case "watch": {
 					if (!params.pid) throw new Error("async_monitor watch requires pid");
 					const job = await startWatch(ctx, params.pid, params.label, params.outputPath);
 					persistStarted(job);
+					armPolling(ctx);
 					return textContent(`External process watch registered (observation-only).\n${formatJobLine(job)}`, { action: "watch", job });
 				}
 				case "list": {
@@ -619,6 +657,7 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 			try {
 				const job = await startDispatch(ctx, args);
 				persistStarted(job);
+				armPolling(ctx);
 				ctx.ui.notify(`Durable async job started [${job.metadata.id}]`, "info");
 				await poll(ctx);
 			} catch (error) {
@@ -638,6 +677,7 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 					const parsed = parseSlashCommand(rest);
 					const job = await startCommand(ctx, action === "start" ? "check" : "run", parsed.command, parsed.options);
 					persistStarted(job);
+					armPolling(ctx);
 					ctx.ui.notify(`${action === "start" ? "Polling condition" : "Durable command"} started [${job.metadata.id}]`, "info");
 				} else if (action === "list") {
 					const jobs = (await listJobs()).filter((job) => job.metadata.cwd === ctx.cwd && !job.acknowledged);

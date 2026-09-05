@@ -77,11 +77,12 @@ const evidence={
   transcriptCompletions:custom.length,
   customMessageEvents:contextEvents.length,
   deliveryState:receipt.state,
+  deliveryRewriteLagMs:new Date(receipt.updatedAt).getTime()-run.completionSeenAt,
   sessionId:run.state.sessionId,
   settled:run.settled,
 };
 console.log(JSON.stringify(evidence,null,2));
-if(evidence.startReturnMs>2000||result.status!=='completed'||!evidence.outputHasDone||evidence.pulseCount<10||custom.length!==1||receipt.state!=='delivered'||!run.settled) process.exit(1);
+if(evidence.startReturnMs>2000||result.status!=='completed'||!evidence.outputHasDone||evidence.pulseCount<10||custom.length!==1||receipt.state!=='delivered'||evidence.deliveryRewriteLagMs>2000||!run.settled) process.exit(1);
 NODE
 
 echo "artifacts=$TMP"

@@ -371,12 +371,15 @@ export async function markDelivered(
 	jobDir: string,
 	sessionId: string,
 	instanceId: string,
-): Promise<void> {
-	await atomicWriteJson(deliveryPath(jobDir, sessionId), {
+): Promise<boolean> {
+	const path = deliveryPath(jobDir, sessionId);
+	if ((await readJson<DeliveryReceipt>(path))?.state === "delivered") return false;
+	await atomicWriteJson(path, {
 		state: "delivered",
 		instanceId,
 		updatedAt: new Date().toISOString(),
 	} satisfies DeliveryReceipt);
+	return true;
 }
 
 export async function claimDelivery(
