@@ -19,12 +19,13 @@ not install the external CLIs those skills describe.
 |---|---|---|
 | `async-monitor` | Run durable commands, polling checks, and detached Pi tasks with automatic session delivery | Node.js; Pi |
 | `pi-deepseek-websearch` | Register a `deepseek_search` tool that runs DeepSeek's server-side web search | DeepSeek key (`/login` or `DEEPSEEK_API_KEY`); Pi |
+| `session-id-status` | Show the current session ID in Pi's default footer | Pi |
 | `tps` | Show current and session-average generation speed in Pi's footer | Pi |
 | `work-timer` | Show live and final agent work duration in Pi's footer | Pi |
 
 `async-monitor` and `pi-deepseek-websearch` are directories (`index.ts`
-entrypoints). `tps` and `work-timer` are single files. The installer accepts
-both forms.
+entrypoints). `session-id-status`, `tps`, and `work-timer` are single files.
+The installer accepts both forms.
 
 ## Install everything
 
@@ -60,12 +61,14 @@ mkdir -p ~/.agents/skills
 cp -r skills/article-html ~/.agents/skills/article-html
 ```
 
-One Pi extension (Pi must already exist):
+Pi extension examples (Pi must already exist):
 
 ```bash
 mkdir -p ~/.pi/agent/extensions
 cp -r pi-extensions/async-monitor ~/.pi/agent/extensions/async-monitor
+cp pi-extensions/session-id-status.ts ~/.pi/agent/extensions/session-id-status.ts
 cp pi-extensions/tps.ts ~/.pi/agent/extensions/tps.ts
+cp pi-extensions/work-timer.ts ~/.pi/agent/extensions/work-timer.ts
 cp -r pi-extensions/pi-deepseek-websearch ~/.pi/agent/extensions/pi-deepseek-websearch
 ```
 
@@ -88,6 +91,7 @@ installed. You can combine and repeat selectors.
 ```bash
 ./install.sh --skill article-html
 ./install.sh --skill async-monitor --skill launch-agents
+./install.sh --extension session-id-status.ts
 ./install.sh --extension tps.ts
 ./install.sh --extension async-monitor
 ./install.sh --extension pi-deepseek-websearch
@@ -99,6 +103,7 @@ Make does the same selection (`make help` lists the variables):
 ```bash
 make install SKILL=article-html
 make install SKILL="async-monitor launch-agents"
+make install EXTENSION=session-id-status.ts
 make install EXTENSION=tps.ts
 make install EXTENSION=pi-deepseek-websearch
 make install-skill NAME=launch-agents
@@ -132,4 +137,5 @@ failure (conflict without `--backup-existing`, or confirmation needed on
 non-terminal stdin); `2` invocation error (unknown option or item).
 
 `make test` runs a hermetic suite in temp directories. It never touches
-real agent directories.
+real agent directories. It requires Bash and [Bun](https://bun.sh/) to execute
+the TypeScript extension behavior tests.

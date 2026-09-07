@@ -58,10 +58,15 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const startTimer = (ctx: ExtensionContext) => {
-		stopTimer();
+		// agent_start may fire again for retries, compaction, or queued follow-ups.
+		// Keep one timer for the complete run that began with the user message.
+		if (running) return;
+
 		startTime = Date.now();
 		running = true;
 		debug("start", startTime);
+		if (!ctx.hasUI) return;
+
 		updateStatus(ctx);
 		timer = setInterval(() => {
 			updateStatus(ctx);
@@ -73,10 +78,14 @@ export default function (pi: ExtensionAPI) {
 		startTimer(ctx);
 	});
 
-	// Agent finished; freeze the final duration in the status line.
-	pi.on("agent_end", async (_event, ctx) => {
+	// Wait for retries, compaction, and queued follow-ups before finalizing.
+	pi.on("agent_settled", async (_event, ctx) => {
+		if (!running) return;
+
+		const duration = formatDuration(Math.max(0, Date.now() - startTime));
 		stopTimer();
 		updateStatus(ctx, true);
+		if (ctx.hasUI) ctx.ui.notify(`Work time: ${duration}`, "info");
 	});
 
 	// NOTE: We intentionally do NOT reset on steering messages.
@@ -85,7 +94,8 @@ export default function (pi: ExtensionAPI) {
 	// only when the next `agent_start` fires.
 
 	// Cleanup when the session shuts down or reloads.
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		stopTimer();
+		if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
 	});
 }

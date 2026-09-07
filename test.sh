@@ -16,7 +16,7 @@ cd "$repo_root"
 
 # Explicit expected inventory. Update when adding installable items.
 skills=(article-html async-monitor launch-agents)
-extensions=(async-monitor pi-deepseek-websearch tps.ts work-timer.ts)
+extensions=(async-monitor pi-deepseek-websearch session-id-status.ts tps.ts work-timer.ts)
 
 workspace() {
   local d=$1
@@ -76,7 +76,10 @@ no_mutation() {
 # 1. Shell syntax
 check "install.sh passes bash -n" 0 bash -n install.sh
 
-# 2. make help integrity (a truncated help recipe must not pass)
+# 2. Extension lifecycle/UI behavior with mocked Pi contexts.
+check "Pi extension behavior" 0 bun pi-extensions/test.ts
+
+# 3. make help integrity (a truncated help recipe must not pass)
 help_out=$(make help 2>&1)
 help_rc=$?
 if [[ "$help_rc" == 0 ]] && grep -q 'Conventions:' <<<"$help_out" \
@@ -94,6 +97,7 @@ if [[ "$rc" == 0 && "$plan_count" == 1 ]] \
   && grep -q 'skill async-monitor' <<<"$out" \
   && grep -q 'pi skill launch-agents' <<<"$out" \
   && grep -q 'extension async-monitor' <<<"$out" \
+  && grep -q 'extension session-id-status.ts' <<<"$out" \
   && grep -q 'extension tps.ts' <<<"$out"; then
   ok "dry-run prints exactly one plan"
 else
