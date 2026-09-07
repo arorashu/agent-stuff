@@ -30,8 +30,10 @@ import {
 	isSameProcess,
 	jobDirFor,
 	listJobs,
+	listPendingJobs,
 	makeJobId,
 	markDelivered,
+	reconcileSession,
 	pathExists,
 	readJson,
 	readOutputExcerpt,
@@ -444,9 +446,8 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 		polling = true;
 		const generation = pollingGeneration;
 		try {
-			const jobs = await listJobs();
+			const sessionJobs = await listPendingJobs(sessionId);
 			if (!active) return;
-			const sessionJobs = jobs.filter((job) => job.metadata.subscribers.includes(sessionId));
 			updateStatus(ctx, sessionJobs);
 			if (!ctx.hasUI) {
 				if (timer) { clearInterval(timer); timer = undefined; }
@@ -513,6 +514,7 @@ export default function asyncMonitorExtension(pi: ExtensionAPI) {
 			scannedEntryCount = 0;
 			sessionDeliveries.clear();
 			confirmedDeliveries.clear();
+			await reconcileSession(sessionId);
 			// Register the interval BEFORE the (async) initial poll so a
 			// session_shutdown that lands during the poll still clears it; the
 			// catch below covers the dispose-without-shutdown race (web app):

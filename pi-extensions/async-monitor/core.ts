@@ -21,6 +21,8 @@ export const STORE_VERSION = 1;
 export const STARTUP_GRACE_MS = 15_000;
 export const DELIVERY_CLAIM_TTL_MS = 60_000;
 export const DEFAULT_POLL_MS = 1_000;
+export const GC_GRACE_MS = 24 * 60 * 60 * 1_000;
+export const TMP_STALE_MS = 60 * 60 * 1_000;
 export const NOTIFICATION_MAX_BYTES = 12 * 1024;
 export const NOTIFICATION_MAX_LINES = 200;
 export const TOOL_MAX_BYTES = 50 * 1024;
@@ -120,6 +122,37 @@ export function getStoreRoot(): string {
 
 export function getJobsRoot(storeRoot = getStoreRoot()): string {
 	return join(storeRoot, "jobs");
+}
+
+function storeRootFromJobDir(jobDir: string): string {
+	return dirname(dirname(jobDir));
+}
+
+function pendingDir(sessionId: string, storeRoot = getStoreRoot()): string {
+	return join(storeRoot, "sessions", safeSegment(sessionId), "pending");
+}
+
+export function pendingMarkerPath(sessionId: string, jobId: string, storeRoot = getStoreRoot()): string {
+	return join(pendingDir(sessionId, storeRoot), jobId);
+}
+
+export async function enqueuePending(sessionId: string, jobId: string, storeRoot = getStoreRoot()): Promise<void> {
+	assertJobId(jobId);
+	const path = pendingMarkerPath(sessionId, jobId, storeRoot);
+	await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	try {
+		await writeFile(path, "", { flag: "wx", mode: 0o600 });
+	} catch (error: any) {
+		if (error?.code !== "EEXIST") throw error;
+	}
+}
+
+export async function dequeuePending(sessionId: string, jobId: string, storeRoot = getStoreRoot()): Promise<void> {
+	try {
+		await unlink(pendingMarkerPath(sessionId, jobId, storeRoot));
+	} catch (error: any) {
+		if (error?.code !== "ENOENT") throw error;
+	}
 }
 
 export async function ensureStore(storeRoot = getStoreRoot()): Promise<string> {
@@ -248,6 +281,7 @@ export async function createJob(metadata: JobMetadata, storeRoot = getStoreRoot(
 	await mkdir(join(dir, "deliveries"), { mode: 0o700 });
 	await writeFile(join(dir, "output.log"), "", { flag: "wx", mode: 0o600 });
 	await atomicWriteJson(join(dir, "metadata.json"), metadata);
+	for (const sessionId of metadata.subscribers) await enqueuePending(sessionId, metadata.id, storeRoot);
 	return dir;
 }
 
@@ -326,6 +360,91 @@ export async function listJobs(storeRoot = getStoreRoot(), now = new Date()): Pr
 	return snapshots.sort((a, b) => b.metadata.createdAt.localeCompare(a.metadata.createdAt));
 }
 
+export async function listPendingJobs(
+	sessionId: string,
+	storeRoot = getStoreRoot(),
+	now = new Date(),
+): Promise<JobSnapshot[]> {
+	let names: string[] = [];
+	try {
+		names = await readdir(pendingDir(sessionId, storeRoot));
+	} catch (error: any) {
+		if (error?.code === "ENOENT") return [];
+		throw error;
+	}
+	const snapshots: JobSnapshot[] = [];
+	for (const name of names) {
+		if (!/^[a-z0-9]+-[a-f0-9]{8}$/.test(name)) continue;
+		try {
+			snapshots.push(await snapshotJob(jobDirFor(name, storeRoot), now));
+		} catch {
+			await dequeuePending(sessionId, name, storeRoot);
+		}
+	}
+	return snapshots.sort((a, b) => b.metadata.createdAt.localeCompare(a.metadata.createdAt));
+}
+
+export async function gcJobs(
+	storeRoot = getStoreRoot(),
+	now = new Date(),
+	graceMs = GC_GRACE_MS,
+): Promise<number> {
+	const jobsRoot = await ensureStore(storeRoot);
+	const entries = await readdir(jobsRoot, { withFileTypes: true });
+	let removed = 0;
+	for (const entry of entries) {
+		if (!entry.isDirectory() || !/^[a-z0-9]+-[a-f0-9]{8}$/.test(entry.name)) continue;
+		const jobDir = join(jobsRoot, entry.name);
+		await removeStaleDeliveryFiles(jobDir);
+		const result = await readJson<JobResult>(join(jobDir, "result.json"));
+		const metadata = await readJson<JobMetadata>(join(jobDir, "metadata.json"));
+		if (!result || !metadata) continue;
+		const completed = Date.parse(result.completedAt);
+		if (!Number.isFinite(completed) || now.getTime() - completed < graceMs) continue;
+		let delivered = true;
+		for (const sessionId of metadata.subscribers) {
+			const receipt = await readJson<DeliveryReceipt>(deliveryPath(jobDir, sessionId));
+			if (receipt?.state !== "delivered") {
+				delivered = false;
+				break;
+			}
+		}
+		if (!delivered) continue;
+		await rm(jobDir, { recursive: true, force: true });
+		for (const sessionId of metadata.subscribers) await dequeuePending(sessionId, metadata.id, storeRoot);
+		removed += 1;
+	}
+	return removed;
+}
+
+export async function reconcileSession(
+	sessionId: string,
+	storeRoot = getStoreRoot(),
+	now = new Date(),
+	graceMs = GC_GRACE_MS,
+): Promise<void> {
+	await gcJobs(storeRoot, now, graceMs);
+	const jobs = await listJobs(storeRoot, now);
+	const live = new Set<string>();
+	for (const job of jobs) {
+		if (!job.metadata.subscribers.includes(sessionId)) continue;
+		live.add(job.metadata.id);
+		const receipt = await readJson<DeliveryReceipt>(deliveryPath(job.dir, sessionId));
+		if (receipt?.state === "delivered") await dequeuePending(sessionId, job.metadata.id, storeRoot);
+		else await enqueuePending(sessionId, job.metadata.id, storeRoot);
+	}
+	let names: string[] = [];
+	try {
+		names = await readdir(pendingDir(sessionId, storeRoot));
+	} catch (error: any) {
+		if (error?.code === "ENOENT") return;
+		throw error;
+	}
+	for (const name of names) {
+		if (!live.has(name)) await dequeuePending(sessionId, name, storeRoot);
+	}
+}
+
 export async function readOutputExcerpt(
 	path: string,
 	maxBytes = TOOL_MAX_BYTES,
@@ -373,13 +492,16 @@ export async function markDelivered(
 	instanceId: string,
 ): Promise<boolean> {
 	const path = deliveryPath(jobDir, sessionId);
-	if ((await readJson<DeliveryReceipt>(path))?.state === "delivered") return false;
-	await atomicWriteJson(path, {
-		state: "delivered",
-		instanceId,
-		updatedAt: new Date().toISOString(),
-	} satisfies DeliveryReceipt);
-	return true;
+	const already = (await readJson<DeliveryReceipt>(path))?.state === "delivered";
+	if (!already) {
+		await atomicWriteJson(path, {
+			state: "delivered",
+			instanceId,
+			updatedAt: new Date().toISOString(),
+		} satisfies DeliveryReceipt);
+	}
+	await dequeuePending(sessionId, basename(jobDir), storeRootFromJobDir(jobDir));
+	return !already;
 }
 
 export async function claimDelivery(
@@ -439,11 +561,14 @@ export async function removeStaleDeliveryFiles(jobDir: string): Promise<void> {
 		throw error;
 	}
 	for (const name of names) {
-		if (!name.includes(".stale.")) continue;
+		const stale = name.includes(".stale.");
+		const tmp = name.endsWith(".tmp");
+		if (!stale && !tmp) continue;
 		const path = join(dir, name);
 		try {
 			const info = await stat(path);
-			if (Date.now() - info.mtimeMs > 24 * 60 * 60 * 1000) await unlink(path);
+			const age = Date.now() - info.mtimeMs;
+			if ((stale && age > 24 * 60 * 60 * 1000) || (tmp && age > TMP_STALE_MS)) await unlink(path);
 		} catch (error: any) {
 			if (error?.code !== "ENOENT") throw error;
 		}

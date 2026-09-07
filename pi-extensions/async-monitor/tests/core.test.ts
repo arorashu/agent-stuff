@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,16 +10,24 @@ import {
 	claimDelivery,
 	createJob,
 	deliveryPath,
+	dequeuePending,
 	exclusiveWriteJson,
+	gcJobs,
 	getProcessIdentity,
 	isSameProcess,
 	jobDirFor,
+	listPendingJobs,
 	makeJobId,
 	markDelivered,
+	pathExists,
+	pendingMarkerPath,
 	readJson,
 	readOutputExcerpt,
+	reconcileSession,
+	removeStaleDeliveryFiles,
 	sanitizeOutput,
 	snapshotJob,
+	writeResult,
 	type JobMetadata,
 	type JobResult,
 } from "../core.ts";
@@ -134,6 +142,65 @@ describe("delivery claims", () => {
 		expect(await claimDelivery(dir, "session-a", "old", old)).toBe(true);
 		expect(await claimDelivery(dir, "session-a", "old", new Date())).toBe(false);
 		expect(await claimDelivery(dir, "session-a", "new", new Date())).toBe(true);
+	});
+});
+
+describe("pending observation and gc", () => {
+	test("createJob enqueues and markDelivered dequeues", async () => {
+		const store = await root();
+		const data = metadata(store);
+		const dir = await createJob(data, store);
+		expect(await pathExists(pendingMarkerPath("session-a", data.id, store))).toBe(true);
+		expect((await listPendingJobs("session-a", store)).map((job) => job.metadata.id)).toEqual([data.id]);
+		await markDelivered(dir, "session-a", "one");
+		expect(await pathExists(pendingMarkerPath("session-a", data.id, store))).toBe(false);
+		expect(await listPendingJobs("session-a", store)).toEqual([]);
+	});
+
+	test("gc deletes old delivered jobs and keeps the rest", async () => {
+		const store = await root();
+		const old = metadata(store);
+		const recent = metadata(store);
+		const undelivered = metadata(store);
+		const running = metadata(store);
+		const oldDir = await createJob(old, store);
+		const recentDir = await createJob(recent, store);
+		const undeliveredDir = await createJob(undelivered, store);
+		const runningDir = await createJob(running, store);
+		const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+		await writeResult(oldDir, { version: STORE_VERSION, jobId: old.id, status: "completed", completedAt: twoDaysAgo });
+		await writeResult(recentDir, { version: STORE_VERSION, jobId: recent.id, status: "completed", completedAt: new Date().toISOString() });
+		await writeResult(undeliveredDir, { version: STORE_VERSION, jobId: undelivered.id, status: "failed", completedAt: twoDaysAgo });
+		await markDelivered(oldDir, "session-a", "one");
+		await markDelivered(recentDir, "session-a", "one");
+		expect(await gcJobs(store)).toBe(1);
+		expect(await pathExists(oldDir)).toBe(false);
+		expect(await pathExists(recentDir)).toBe(true);
+		expect(await pathExists(undeliveredDir)).toBe(true);
+		expect(await pathExists(runningDir)).toBe(true);
+	});
+
+	test("reconcileSession indexes legacy jobs without pending markers", async () => {
+		const store = await root();
+		const data = metadata(store);
+		const dir = await createJob(data, store);
+		await dequeuePending("session-a", data.id, store);
+		expect(await listPendingJobs("session-a", store)).toEqual([]);
+		await reconcileSession("session-a", store);
+		expect((await listPendingJobs("session-a", store)).map((job) => job.metadata.id)).toEqual([data.id]);
+		expect(await pathExists(dir)).toBe(true);
+	});
+
+	test("drops stale delivery temp files", async () => {
+		const store = await root();
+		const data = metadata(store);
+		const dir = await createJob(data, store);
+		const tmp = join(dir, "deliveries", ".session-a.json.1.deadbeef.tmp");
+		await writeFile(tmp, "{}");
+		const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+		await utimes(tmp, old, old);
+		await removeStaleDeliveryFiles(dir);
+		expect(await pathExists(tmp)).toBe(false);
 	});
 });
 
