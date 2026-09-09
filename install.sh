@@ -7,6 +7,7 @@ pi_mode=auto
 assume_yes=false
 wanted_skills=()
 wanted_extensions=()
+wanted_codex_monitor=false
 
 usage() {
   cat <<'EOF'
@@ -19,6 +20,7 @@ Options:
   --dry-run          Print the plan and exit without making changes
   --skill NAME       Select this skill (repeatable)
   --extension NAME   Select this extension (repeatable)
+  --codex-monitor    Select the codex-monitor CLI
   --pi               Install Pi links even if ~/.pi/agent does not exist
   --no-pi            Do not install Pi links
   -y, --yes          Apply without the confirmation prompt
@@ -70,6 +72,9 @@ while (($#)); do
       wanted_extensions+=("$2")
       shift
       ;;
+    --codex-monitor)
+      wanted_codex_monitor=true
+      ;;
     -h|--help)
       usage
       exit 0
@@ -86,6 +91,7 @@ done
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 shared_root="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
+local_bin_root="${LOCAL_BIN_DIR:-$HOME/.local/bin}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
@@ -115,6 +121,7 @@ for want in "${wanted_extensions[@]}"; do
 done
 
 selected_any=$(( ${#wanted_skills[@]} + ${#wanted_extensions[@]} ))
+"$wanted_codex_monitor" && selected_any=$((selected_any + 1))
 
 if (( ${#wanted_skills[@]} > 0 )); then
   skills=()
@@ -142,7 +149,12 @@ else
   extensions=()
 fi
 
-if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )); then
+install_codex_monitor=false
+if "$wanted_codex_monitor" || (( selected_any == 0 )); then
+  install_codex_monitor=true
+fi
+
+if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )) && ! "$install_codex_monitor"; then
   printf 'Nothing selected to install.\n'
   exit 0
 fi
@@ -324,6 +336,17 @@ show_plan() {
   local changes=0
 
   printf 'Install plan:\n'
+
+  if "$install_codex_monitor"; then
+    if same_target "$repo_root/codex-monitor/bin/codex-monitor.mjs" "$local_bin_root/codex-monitor"; then
+      printf '  [skip]    codex-monitor (already installed)\n'
+    else
+      changes=$((changes + 1))
+      plan_entry 'cli' 'codex-monitor' "$repo_root/codex-monitor/bin/codex-monitor.mjs" \
+        "$local_bin_root/codex-monitor" "$(dirname -- "$local_bin_root")/bin-backups/$timestamp"
+    fi
+  fi
+
   for name in "${skills[@]}"; do
     if same_target "$repo_root/skills/$name" "$shared_root/$name"; then
       printf '  [skip]    skill %s (already installed)\n' "$name"
@@ -406,6 +429,19 @@ for name in "${extensions[@]}"; do
   exit 1
 done
 
+if "$install_codex_monitor"; then
+  for source in bin/codex-monitor.mjs src/app-server-client.mjs src/thread-delivery.mjs; do
+    if [[ ! -f "$repo_root/codex-monitor/$source" ]]; then
+      printf 'Missing Codex monitor package file: %s\n' "$repo_root/codex-monitor/$source" >&2
+      exit 1
+    fi
+  done
+  if [[ ! -x "$repo_root/codex-monitor/bin/codex-monitor.mjs" ]]; then
+    printf 'Codex monitor launcher is not executable: %s\n' "$repo_root/codex-monitor/bin/codex-monitor.mjs" >&2
+    exit 1
+  fi
+fi
+
 install_pi=false
 case "$pi_mode" in
   always)
@@ -419,6 +455,15 @@ case "$pi_mode" in
 esac
 
 preflight "$shared_root" "$repo_root/skills" "skill paths" "${skills[@]}"
+if "$install_codex_monitor"; then
+  if [[ -e "$local_bin_root/codex-monitor" || -L "$local_bin_root/codex-monitor" ]]; then
+    if ! same_target "$repo_root/codex-monitor/bin/codex-monitor.mjs" "$local_bin_root/codex-monitor" && ! "$backup_existing"; then
+      printf 'Refusing to replace existing CLI path:\n  %s\n' "$local_bin_root/codex-monitor" >&2
+      printf 'Rerun with --backup-existing to move it aside safely.\n' >&2
+      exit 1
+    fi
+  fi
+fi
 preflight_codex_duplicates
 if "$install_pi"; then
   preflight_pi
@@ -432,6 +477,19 @@ fi
 confirm
 
 migrate_codex_duplicates
+if "$install_codex_monitor"; then
+  mkdir -p -- "$local_bin_root"
+  if ! same_target "$repo_root/codex-monitor/bin/codex-monitor.mjs" "$local_bin_root/codex-monitor"; then
+    if [[ -e "$local_bin_root/codex-monitor" || -L "$local_bin_root/codex-monitor" ]]; then
+      backup_root="$(dirname -- "$local_bin_root")/bin-backups/$timestamp"
+      mkdir -p -- "$backup_root"
+      mv -- "$local_bin_root/codex-monitor" "$backup_root/codex-monitor"
+      printf 'Backed up: %s -> %s\n' "$local_bin_root/codex-monitor" "$backup_root/codex-monitor"
+    fi
+    ln -s -- "$repo_root/codex-monitor/bin/codex-monitor.mjs" "$local_bin_root/codex-monitor"
+    printf 'Installed: %s -> %s\n' "$local_bin_root/codex-monitor" "$repo_root/codex-monitor/bin/codex-monitor.mjs"
+  fi
+fi
 install_links "$shared_root" "$repo_root/skills" "skill-backups" "${skills[@]}"
 if "$install_pi"; then
   install_links "$pi_root" "$shared_root" "skill-backups" "${skills[@]}"

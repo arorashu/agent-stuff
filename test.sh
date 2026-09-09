@@ -2,7 +2,8 @@
 # Hermetic smoke tests for install.sh and the make facade.
 #
 # All filesystem access is isolated in mktemp directories via the
-# AGENT_SKILLS_DIR, CODEX_SKILLS_DIR, PI_SKILLS_DIR, and PI_EXTENSIONS_DIR
+# AGENT_SKILLS_DIR, CODEX_SKILLS_DIR, PI_SKILLS_DIR, PI_EXTENSIONS_DIR,
+# and LOCAL_BIN_DIR
 # overrides plus a temporary HOME; real agent directories are never touched.
 #
 # Assertion strategy: exact for contract state (exit codes, path existence,
@@ -28,7 +29,8 @@ workspace() {
     AGENT_SKILLS_DIR="$d/agents" \
     CODEX_SKILLS_DIR="$d/codex" \
     PI_SKILLS_DIR="$d/pi" \
-    PI_EXTENSIONS_DIR="$d/piext"
+    PI_EXTENSIONS_DIR="$d/piext" \
+    LOCAL_BIN_DIR="$d/bin"
 }
 
 tmp=$(mktemp -d) || { printf 'mktemp -d failed\n' >&2; exit 1; }
@@ -94,6 +96,7 @@ out=$(./install.sh --dry-run --pi 2>&1)
 rc=$?
 plan_count=$(grep -c 'Install plan:' <<<"$out")
 if [[ "$rc" == 0 && "$plan_count" == 1 ]] \
+  && grep -q 'cli codex-monitor' <<<"$out" \
   && grep -q 'skill async-monitor' <<<"$out" \
   && grep -q 'pi skill launch-agents' <<<"$out" \
   && grep -q 'extension async-monitor' <<<"$out" \
@@ -104,6 +107,7 @@ else
   bad "dry-run single plan (rc=$rc, plans=$plan_count)"
 fi
 no_mutation "dry-run leaves destination trees empty" "$tmp/w1/agents" "$tmp/w1/pi" "$tmp/w1/piext"
+[[ ! -e "$tmp/w1/bin/codex-monitor" ]] && ok "dry-run leaves CLI uninstalled" || bad "dry-run installed CLI"
 if [[ ! -d "$tmp/w1/skill-backups" && ! -d "$tmp/w1/extension-backups" ]]; then
   ok "dry-run creates no backup roots"
 else
@@ -153,6 +157,12 @@ fi
 # 8. Apply with -y: symlinks exist and resolve to repo sources (fresh)
 workspace "$tmp/w3"
 check "apply with -y" 0 ./install.sh --pi -y
+if [[ -L "$tmp/w3/bin/codex-monitor" ]] \
+  && [[ "$(readlink -f "$tmp/w3/bin/codex-monitor")" == "$repo_root/codex-monitor/bin/codex-monitor.mjs" ]]; then
+  ok "apply installed codex-monitor with repo-relative sources"
+else
+  bad "codex-monitor launcher target"
+fi
 link_ok=true
 for name in "${skills[@]}"; do
   [[ -L "$tmp/w3/agents/$name" && "$(readlink -f "$tmp/w3/agents/$name")" == "$repo_root/skills/$name" ]] || link_ok=false
@@ -200,6 +210,33 @@ if [[ -n "$moved" && "$(cat "$moved")" == "sentinel" ]] \
 else
   bad "backup relocation (found: ${moved:-none})"
 fi
+
+# 12. Codex monitor selection is isolated and backs up an existing launcher.
+workspace "$tmp/w5"
+mkdir -p "$tmp/w5/bin"
+printf '#!/bin/sh\nexit 99\n' > "$tmp/w5/bin/codex-monitor"
+chmod +x "$tmp/w5/bin/codex-monitor"
+check "codex-monitor conflict refuses without backup" 1 ./install.sh --codex-monitor -y
+check "codex-monitor backup install applies" 0 ./install.sh --codex-monitor --backup-existing -y
+old_monitor=$(find "$tmp/w5/bin-backups" -type f -name codex-monitor 2>/dev/null)
+if [[ -n "$old_monitor" ]] \
+  && [[ -L "$tmp/w5/bin/codex-monitor" ]] \
+  && [[ "$(readlink -f "$tmp/w5/bin/codex-monitor")" == "$repo_root/codex-monitor/bin/codex-monitor.mjs" ]]; then
+  ok "codex-monitor installer preserved old launcher and linked complete package"
+else
+  bad "codex-monitor backup/link behavior"
+fi
+out=$(./install.sh --codex-monitor </dev/null 2>&1)
+if [[ "$?" == 0 ]] && grep -q 'Nothing to do.' <<<"$out"; then
+  ok "codex-monitor-only install is idempotent without prompting"
+else
+  bad "codex-monitor-only idempotent install"
+fi
+
+# 13. CLI selection preflights its repo-relative source modules.
+mv codex-monitor/src/thread-delivery.mjs codex-monitor/src/thread-delivery.mjs.test-away
+check "codex-monitor refuses incomplete package" 1 ./install.sh --codex-monitor --dry-run
+mv codex-monitor/src/thread-delivery.mjs.test-away codex-monitor/src/thread-delivery.mjs
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]

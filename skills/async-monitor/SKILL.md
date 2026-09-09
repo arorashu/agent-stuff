@@ -23,6 +23,8 @@ separately installed `codex-monitor` command.
 ```
 
 **Codex (`~/.local/bin/codex-monitor`)**
+- Install the complete repo-relative package with `./install.sh --codex-monitor`;
+  the launcher requires its sibling `codex-monitor/src/` modules.
 - `start --title NAME -- <check...>` uses the same `0/10/20` check semantics.
 - `run --title NAME -- <work...>` asks the monitor daemon to own durable work.
 - Agent self-registration may need unsandboxed/escalated execution to reach monitor state and the shared app-server socket. Request narrowly scoped approval; do not evade sandbox policy.

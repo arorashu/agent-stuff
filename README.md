@@ -1,16 +1,16 @@
 # agent-stuff
 
-Reusable agent skills and Pi extensions in one repository.
+Reusable agent skills, Pi extensions, and the `codex-monitor` CLI in one repository.
 
-This repository holds the skill instructions and extension code. It does
-not install the external CLIs those skills describe.
+This repository holds skill instructions, extension code, and a complete
+repo-relative `codex-monitor` package. Other external CLIs remain separate.
 
 ## Skills
 
 | Skill | Purpose | External dependency |
 |---|---|---|
 | `article-html` | Turn a public web article into a self-contained reader HTML file with no banners or subscribe chrome | Network fetch (Jina reader first); clipboard `wl-paste` on this machine |
-| `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | This repository's `async-monitor` Pi extension and/or a separately installed `codex-monitor` |
+| `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | This repository's `async-monitor` Pi extension and/or `codex-monitor` package |
 | `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
 
 ## Pi extensions
@@ -22,6 +22,38 @@ not install the external CLIs those skills describe.
 | `session-id-status` | Show the current session ID in Pi's default footer | Pi |
 | `tps` | Show current and session-average generation speed in Pi's footer | Pi |
 | `work-timer` | Show live and final agent work duration in Pi's footer | Pi |
+
+## Codex monitor
+
+`codex-monitor` owns durable commands and polling checks, then delivers their
+terminal outcome into a Codex thread through an existing shared app-server.
+Its launcher and both `src/` dependencies live together under
+`codex-monitor/`; do not copy the launcher by itself.
+
+The source was recovered from an untracked nix2 working tree with no Git
+history or configured remote, so its earlier commit provenance is unavailable.
+
+`codex-monitor doctor --deep` is a mutating protocol probe: it creates a test
+thread and turn on the selected app-server. Use plain `doctor` for read-only
+connectivity checks.
+
+Set `CODEX_MONITOR_CODEX_BIN` to an explicit Codex executable when multiple
+installations coexist. The monitor uses that exact binary for `app-server
+proxy`; otherwise it resolves `codex` from `PATH`.
+
+Start the standalone-managed shared server and launch receiving TUIs against
+it explicitly. The monitor daemon must inherit the same executable selection:
+
+```bash
+standalone_codex="$HOME/.local/lib/codex-standalone-bin/codex"
+"$standalone_codex" app-server daemon start
+CODEX_MONITOR_CODEX_BIN="$standalone_codex" codex-monitor daemon start
+"$standalone_codex" --remote unix://
+```
+
+These commands are also the post-reboot startup procedure. A regular Codex
+session that was not launched with `--remote unix://` is not attached to this
+shared server and cannot receive monitor notifications live.
 
 `async-monitor` and `pi-deepseek-websearch` are directories (`index.ts`
 entrypoints). `session-id-status`, `tps`, and `work-timer` are single files.
@@ -95,6 +127,7 @@ installed. You can combine and repeat selectors.
 ./install.sh --extension tps.ts
 ./install.sh --extension async-monitor
 ./install.sh --extension pi-deepseek-websearch
+./install.sh --codex-monitor --backup-existing
 ./install.sh --skill article-html --extension work-timer.ts -y
 ```
 
@@ -117,6 +150,7 @@ make install SKILL=async-monitor ARGS="--dry-run"
 ~/.agents/skills/<name>        -> <clone>/skills/<name>
 ~/.pi/agent/skills/<name>      -> ~/.agents/skills/<name>
 ~/.pi/agent/extensions/<name>  -> <clone>/pi-extensions/<name>
+~/.local/bin/codex-monitor     -> <clone>/codex-monitor/bin/codex-monitor.mjs
 ```
 
 Current Codex builds discover `~/.agents/skills`, so the installer does
@@ -135,6 +169,9 @@ with `--backup-existing`. Backups go to timestamped `skill-backups/` or
 Exit codes: `0` applied / no-op / declined / dry-run; `1` operational
 failure (conflict without `--backup-existing`, or confirmation needed on
 non-terminal stdin); `2` invocation error (unknown option or item).
+
+An existing monitor launcher can likewise be moved to a timestamped
+`~/.local/bin-backups/` directory with `--backup-existing`.
 
 `make test` runs a hermetic suite in temp directories. It never touches
 real agent directories. It requires Bash and [Bun](https://bun.sh/) to execute

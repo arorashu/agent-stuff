@@ -1,0 +1,14 @@
+{
+  "name": "codex-monitor",
+  "version": "0.2.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "codex-monitor": "./bin/codex-monitor.mjs"
+  },
+  "scripts": {
+    "check": "node --check bin/codex-monitor.mjs && node --check src/app-server-client.mjs && node --check src/thread-delivery.mjs && node --check test/e2e-tmux.mjs",
+    "doctor": "node bin/codex-monitor.mjs doctor",
+    "e2e:tmux": "node test/e2e-tmux.mjs"
+  }
+}
