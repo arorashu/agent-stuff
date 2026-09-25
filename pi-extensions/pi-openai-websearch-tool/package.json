@@ -1,0 +1,24 @@
+{
+  "name": "pi-openai-websearch-tool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Visible OpenAI Codex web search tool for Pi with confirmed hosted search events",
+  "keywords": ["pi-package", "pi-extension", "web-search", "openai-codex"],
+  "pi": { "extensions": ["./index.ts"] },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "peerDependencies": { "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@earendil-works/pi-tui": "^0.87.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.12",
+    "typebox": "^1.3.14",
+    "typescript": "^5.9.2"
+  }
+}
