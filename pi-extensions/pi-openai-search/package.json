@@ -1,0 +1,21 @@
+{
+  "name": "pi-openai-search",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Native OpenAI Codex hosted web search for Pi using existing ChatGPT OAuth",
+  "keywords": ["pi-package", "pi-extension", "web-search", "openai-codex"],
+  "pi": { "extensions": ["./index.ts"] },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm test"
+  },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.2"
+  }
+}
