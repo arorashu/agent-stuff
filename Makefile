@@ -45,6 +45,7 @@ help:
 
 test:
 	./test.sh
+	python3 tools/mpi/test_mpi.py
 
 install:
 	@for b in "PI:$(PI)" "BACKUP:$(BACKUP)" "DRY:$(DRY)" "YES:$(YES)"; do \

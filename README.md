@@ -1,9 +1,17 @@
 # agent-stuff
 
-Reusable agent skills, Pi extensions, and the `codex-monitor` CLI in one repository.
+Reusable agent skills, Pi extensions, optional launchers, and the `codex-monitor` CLI in one repository.
 
 This repository holds skill instructions, extension code, and a complete
 repo-relative `codex-monitor` package. Other external CLIs remain separate.
+
+## Pi with persistent memory
+
+[`mpi`](tools/mpi/README.md) launches Pi with OptMem instructions and a private,
+persistent memory store. Install it separately with
+`python3 tools/mpi/install.py`; requires Python 3.8+ and Pi. The installer
+downloads a pinned, checksum-verified OptMem script. Memories stay outside
+this repository. See the linked guide for setup on multiple machines.
 
 ## Skills
 
