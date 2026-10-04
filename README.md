@@ -13,6 +13,15 @@ persistent memory store. Install it separately with
 downloads a pinned, checksum-verified OptMem script. Memories stay outside
 this repository. See the linked guide for setup on multiple machines.
 
+## Pi with automatic OptChat history
+
+[`opi`](tools/opi/README.md) is a separate Pi SDK launcher that automatically
+logs the conversation, summarizes it in a binary tree, and starts each turn
+from a bounded memory view. Install with `python3 tools/opi/install.py`.
+Requires Node 22+, Python 3.8+, and the npm Pi 0.87.1 SDK. It makes background
+summarizer calls; see the guide for model selection, costs, caching and limits.
+`pi`, `mpi`, and `opi` remain separate commands with separate memory behavior.
+
 ## Skills
 
 | Skill | Purpose | External dependency |
