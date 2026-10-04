@@ -17,13 +17,13 @@ export function findPiRoot(explicit = process.env.OPI_PI_ROOT) {
       candidate = path.dirname(candidate);
     }
   }
-  throw new Error('Pi SDK not found. Install @earendil-works/pi-coding-agent@0.87.1 with npm, or set OPI_PI_ROOT to its package directory.');
+  throw new Error('Pi SDK not found. Install @earendil-works/pi-coding-agent@1.0.2 with npm, or set OPI_PI_ROOT to its package directory.');
 }
 
 export async function loadPi(explicit) {
   const root = findPiRoot(explicit);
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  if (pkg.version !== '0.87.1') throw new Error(`opi is tested against Pi 0.87.1; found ${pkg.version}. Set OPI_PI_ROOT to a 0.87.1 installation. This check protects context and logging contracts.`);
+  if (!['0.87.1', '1.0.2'].includes(pkg.version)) throw new Error(`opi supports Pi 0.87.1 and 1.0.2; found ${pkg.version}. Update agent-stuff and reinstall opi, or set OPI_PI_ROOT to a supported installation. This check protects context and logging contracts.`);
   return { sdk: await import(pathToFileURL(path.join(root, 'dist/index.js')).href), root, version: pkg.version };
 }
 

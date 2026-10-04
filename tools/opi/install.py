@@ -45,7 +45,7 @@ def main():
         temporary = f.name
     os.chmod(temporary, 0o755)
     os.replace(temporary, binary)
-    print(f'Installed {binary}\nRequires Node 22+ and Pi 0.87.1 (npm installation).\nRun opi --doctor, then opi. mpi is unchanged.')
+    print(f'Installed {binary}\nRequires Node 22+ and Pi 1.0.2 (npm installation).\nRun opi --doctor, then opi. mpi is unchanged.')
 
 
 if __name__ == '__main__':

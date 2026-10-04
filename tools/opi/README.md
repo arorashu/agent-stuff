@@ -14,13 +14,14 @@ using Pi's SDK. It is a separate plain-terminal launcher, not a Pi fork.
 ## Install
 
 Linux or macOS (WSL also works), Node **22+**, Python **3.8+** for installation,
-and the npm installation of **Pi 0.87.1** are required. The SDK version is
+and a supported npm installation of Pi are required: **1.0.2** (recommended)
+or **0.87.1**. The SDK version is
 checked because transcript and extension contracts affect correctness. A
 standalone Pi binary is insufficient; opi needs the JavaScript SDK files.
 
 ```sh
 # If this exact Pi version is not installed already:
-npm install -g @earendil-works/pi-coding-agent@0.87.1
+npm install -g @earendil-works/pi-coding-agent@1.0.2
 # Run pi to configure your model/login before using opi.
 
 git clone https://github.com/arorashu/agent-stuff.git
@@ -40,7 +41,7 @@ and the launcher to `~/.local/bin/opi`. The clone need not stay in place.
 If you want to retain another global Pi version, install the SDK separately:
 
 ```sh
-npm install --prefix "$HOME/.local/share/opi-sdk" @earendil-works/pi-coding-agent@0.87.1
+npm install --prefix "$HOME/.local/share/opi-sdk" @earendil-works/pi-coding-agent@1.0.2
 export OPI_PI_ROOT="$HOME/.local/share/opi-sdk/node_modules/@earendil-works/pi-coding-agent"
 ```
 
@@ -178,7 +179,7 @@ python3 tools/opi/test_install.py
 ```
 
 Core tests use synthetic summaries. The integration test loads the real Pi
-0.87.1 SDK with a local fake provider: it exercises fresh turns, actual zoom
+1.0.2 SDK with a local fake provider: it exercises fresh turns, actual zoom
 execution, in-turn reasoning preservation, compactor calls and restart recall.
 No real model calls or external network requests occur in these tests. Unix
 socket creation must be permitted for the store-lock tests.

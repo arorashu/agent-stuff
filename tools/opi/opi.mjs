@@ -21,7 +21,7 @@ Usage: opi [options] [initial message]
   --memory DIR                History (default: $XDG_DATA_HOME/optchat)
   --view-bytes N              Summary text budget (default: 128000)
   --tools read,bash,...        Built-in allowlist; zoom and date always enabled
-  --pi-root DIR               Pi 0.87.1 npm package directory
+  --pi-root DIR               Pi 1.0.2 npm package directory
   --doctor                    Check SDK and paths without model calls
   -p, --print                  One turn, finish summaries, then exit
   -h, --help                   Show this help

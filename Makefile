@@ -22,7 +22,7 @@ help:
 		'  make install-skill NAME=<name>      Install a single skill' \
 		'  make install-extension NAME=<name>  Install a single extension' \
 		'  make test                           Run the hermetic test suite (temp dirs only)' \
-		'  make test-opi                       Run OptChat tests (requires Pi 0.87.1 SDK)' \
+		'  make test-opi                       Run OptChat tests (requires Pi 1.0.2 SDK)' \
 		'' \
 		'Variables:' \
 		'  SKILL, EXTENSION  Selection. If any selector is given, only the explicitly' \

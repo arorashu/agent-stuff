@@ -10,7 +10,8 @@ import { Compactor } from '../lib/compactor.mjs';
 import { Engine } from '../lib/engine.mjs';
 
 test('real Pi SDK: fresh turns, actual zoom tool loop, retained in-turn signatures, restart recall', async t => {
-  const { sdk, root } = await loadPi();
+  const { sdk, root, version } = await loadPi();
+  t.diagnostic(`Pi SDK ${version}`);
   const { AssistantMessageEventStream } = await import(pathToFileURL(path.join(root, 'node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js')).href);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opi-sdk-'));
   const agentDir = path.join(directory, 'agent');
