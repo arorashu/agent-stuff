@@ -2,14 +2,14 @@
 
 `opi` implements the core architecture from
 [Victor Taelin's OptChat specification](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449)
-using Pi's SDK. It is a separate plain-terminal launcher, not a Pi fork.
+using Pi's SDK. It uses the normal Pi terminal UI through the SDK, without a Pi fork.
 `mpi` remains available and unchanged.
 
 | Launcher | Memory behavior |
 | --- | --- |
 | `pi` | Normal Pi sessions |
 | `mpi` | Normal Pi plus agent-written OptMem notes |
-| `opi` | Automatic history log, background summary tree, fresh Pi session each user turn |
+| `opi` | Automatic history log, background summary tree, fresh model context each user turn |
 
 ## Install
 
@@ -50,8 +50,8 @@ Otherwise opi finds the npm package behind `pi` on PATH.
 
 ## Models and use
 
-By default both the main agent and summarizer use the valid default in your
-Pi settings. **Summarization makes additional model calls.** Choose a cheaper
+By default both the main agent and summarizer use **openai-codex/gpt-6.1-sol**
+through your existing Pi login. `OPI_MODEL` or `--model` overrides this choice. **Summarization makes additional model calls.** Choose a cheaper
 competent summarizer explicitly if desired. Model names are exact `provider/id`
 values from `pi --list-models`; authentication comes from Pi's usual credential
 store or environment. `PI_CODING_AGENT_DIR` selects another Pi config directory.
@@ -68,13 +68,21 @@ agent; the summarizer requests medium effort. `--tools` restricts built-in
 tools; memory tools `zoom` and `date` are always present. Otherwise normal
 Pi default tools are enabled, with their normal filesystem/shell access.
 
-Each text input starts a fresh Pi session with the memory view and your new
-message. Messages typed during a running interactive turn steer Pi at tool
-boundaries. Ctrl-C cancels the active turn or summary wait; Ctrl-C at an idle
-prompt exits. Accepted but undelivered steering text is retained as unanswered
+Run `opi` in a terminal for the normal Pi editor, streaming replies, tool
+rendering, model picker and keyboard shortcuts. `--tui-mode regular|fullscreen`
+selects the layout. Each user turn sends a fresh model context containing the
+frozen memory view and current turn; the UI keeps scrollback in RAM. Escape
+interrupts active work; Pi’s usual Ctrl-C/Ctrl-D shortcuts clear or exit.
+Use `/memory` (or `/memory status`), `/memory view`, `/memory zoom ID N`,
+and `/memory flush` to inspect memory or finish summaries.
+
+`--plain` selects the simpler line interface; piped input also uses it. Pi
+0.87.1 requires `--plain`; the normal UI requires 1.0.2. In line mode, messages
+typed during a running turn steer Pi at tool boundaries. Ctrl-C cancels active
+work; Ctrl-C at an idle prompt exits. Accepted but undelivered steering text is retained as unanswered
 history. It is not automatically executed after restart.
 
-Commands:
+Line-interface commands (`--plain`):
 
 - `/status`: log size, pending summaries, view bytes, and per-process model usage
   (main and compactor separately, including cache read/write tokens and reported cost).
@@ -88,9 +96,12 @@ Commands:
 to stderr, and exits. It can wait indefinitely on repeated summarizer failures;
 Ctrl-C cancels it. Errors identify the failing node and retry every 10 seconds.
 
-Pi skills and AGENTS.md context files are loaded, but ordinary Pi extensions,
-prompt templates, TUI commands, session continuation, and session switching are
-not. Those can depend on a long-lived session or alter the context pipeline.
+Pi skills, themes and AGENTS.md context files are loaded. Ordinary user Pi
+extensions and prompt templates are disabled because they can alter the context
+pipeline. Standard UI commands are available, but session switching, forks,
+tree navigation and ordinary compaction are blocked: choose another
+`--memory DIR` for a different conversation. Cache warming and automatic Pi
+compaction stay disabled without changing your saved Pi settings.
 This launcher is **text-only**; it does not import or archive images or audio.
 No subagent orchestrator is included. Work uses Pi's regular built-in tools.
 
@@ -139,7 +150,7 @@ not delete history. To uninstall, remove `~/.local/bin/opi` and the installed
   not a guaranteed token count, nor a bound on the entire current tool loop.
 - Wait for a fully summarized, under-budget view before a new turn. Freeze it
   before logging the new user message; that new message is sent whole.
-- Fresh in-memory Pi session per user turn; `zoom` and `date` retrieve details.
+- Fresh model context per user turn (separate SDK sessions in line mode); `zoom` and `date` retrieve details.
 - Keep a stable system prompt and view prefix; disable cache-warming pings.
 
 ## Deliberate adaptations and limits
@@ -173,13 +184,26 @@ subagent management and computer-use tools. Those are not included here.
 ## Development checks
 
 ```sh
-node --test tools/opi/test/core.test.mjs
-node --test tools/opi/test/pi.test.mjs
+node --test tools/opi/test/*.test.mjs
 python3 tools/opi/test_install.py
 ```
 
-Core tests use synthetic summaries. The integration test loads the real Pi
-1.0.2 SDK with a local fake provider: it exercises fresh turns, actual zoom
+Core tests use synthetic summaries. The integration tests load the real Pi
+1.0.2 SDK with a local fake provider: they exercise fresh turns, actual zoom
 execution, in-turn reasoning preservation, compactor calls and restart recall.
 No real model calls or external network requests occur in these tests. Unix
 socket creation must be permitted for the store-lock tests.
+
+For real provider calls, using your existing Pi login and isolated temporary
+memory/config/workspace directories:
+
+```sh
+OPI_LIVE_TEST=1 node tools/opi/test/live-e2e.mjs
+```
+
+This explicitly uses the default Codex Sol model and real summarizer. It tests
+process restart, a random Unicode phrase retrieved through zoom, binary-tree
+compression within a 2,048-byte view, and recall after a later correction.
+It prints its artifact directory and removes its temporary credential symlink
+on completion. It does not write to your regular opi or mpi memory. Model calls
+consume your provider quota. See [TESTING.md](TESTING.md) for observed results.
