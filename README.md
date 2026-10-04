@@ -1,9 +1,26 @@
 # agent-stuff
 
-Reusable agent skills, Pi extensions, and the `codex-monitor` CLI in one repository.
+Reusable agent skills, Pi extensions, optional launchers, and the `codex-monitor` CLI in one repository.
 
 This repository holds skill instructions, extension code, and a complete
 repo-relative `codex-monitor` package. Other external CLIs remain separate.
+
+## Pi with persistent memory
+
+[`mpi`](tools/mpi/README.md) launches Pi with OptMem instructions and a private,
+persistent memory store. Install it separately with
+`python3 tools/mpi/install.py`; requires Python 3.8+ and Pi. The installer
+downloads a pinned, checksum-verified OptMem script. Memories stay outside
+this repository. See the linked guide for setup on multiple machines.
+
+## Pi with automatic OptChat history
+
+[`opi`](tools/opi/README.md) is a separate Pi SDK launcher that automatically
+logs the conversation, summarizes it in a binary tree, and starts each turn
+from a bounded memory view. Install with `python3 tools/opi/install.py`.
+Requires Node 22+, Python 3.8+, and the npm Pi 1.0.2 SDK. It makes background
+summarizer calls; see the guide for model selection, costs, caching and limits.
+`pi`, `mpi`, and `opi` remain separate commands with separate memory behavior.
 
 ## Skills
 

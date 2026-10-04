@@ -8,7 +8,7 @@ DRY ?=
 YES ?=
 ARGS ?=
 
-.PHONY: help install install-skill install-extension test
+.PHONY: help install install-skill install-extension test test-opi
 
 help:
 	@printf '%s\n' \
@@ -22,6 +22,7 @@ help:
 		'  make install-skill NAME=<name>      Install a single skill' \
 		'  make install-extension NAME=<name>  Install a single extension' \
 		'  make test                           Run the hermetic test suite (temp dirs only)' \
+		'  make test-opi                       Run OptChat tests (requires Pi 1.0.2 SDK)' \
 		'' \
 		'Variables:' \
 		'  SKILL, EXTENSION  Selection. If any selector is given, only the explicitly' \
@@ -43,8 +44,13 @@ help:
 		'' \
 		'Exit codes: 0 applied/no-op/declined, 1 operational failure, 2 invocation error'
 
+test-opi:
+	node --test tools/opi/test/*.test.mjs
+	python3 tools/opi/test_install.py
+
 test:
 	./test.sh
+	python3 tools/mpi/test_mpi.py
 
 install:
 	@for b in "PI:$(PI)" "BACKUP:$(BACKUP)" "DRY:$(DRY)" "YES:$(YES)"; do \
