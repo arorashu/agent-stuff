@@ -8,7 +8,7 @@ DRY ?=
 YES ?=
 ARGS ?=
 
-.PHONY: help install install-skill install-extension test test-opi
+.PHONY: help install install-skill install-extension install-codex-launcher test test-opi
 
 help:
 	@printf '%s\n' \
@@ -21,6 +21,7 @@ help:
 		'  make install EXTENSION="x y"        Install specific extensions (quote multi-values)' \
 		'  make install-skill NAME=<name>      Install a single skill' \
 		'  make install-extension NAME=<name>  Install a single extension' \
+		'  make install-codex-launcher          Install the opt-in Codex launcher suite' \
 		'  make test                           Run the hermetic test suite (temp dirs only)' \
 		'  make test-opi                       Run OptChat tests (requires Pi 1.0.2 SDK)' \
 		'' \
@@ -75,3 +76,6 @@ install-skill:
 install-extension:
 	@[ -n "$(NAME)" ] || { echo "Usage: make install-extension NAME=<extension>" >&2; exit 2; }
 	$(MAKE) install EXTENSION=$(NAME)
+
+install-codex-launcher:
+	./install.sh --codex-launcher

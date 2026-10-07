@@ -238,5 +238,8 @@ mv codex-monitor/src/thread-delivery.mjs codex-monitor/src/thread-delivery.mjs.t
 check "codex-monitor refuses incomplete package" 1 ./install.sh --codex-monitor --dry-run
 mv codex-monitor/src/thread-delivery.mjs.test-away codex-monitor/src/thread-delivery.mjs
 
+# 14. Launcher installation/migration, PATH, and routing (isolated mock binaries).
+check "codexr launcher suite" 0 bash codex-launcher/test.sh
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" == 0 ]]

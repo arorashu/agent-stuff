@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec "${CODEX_LAUNCHER_MISE_BIN:-/usr/bin/mise}" x codex -- codex "$@"

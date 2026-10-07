@@ -8,6 +8,7 @@ assume_yes=false
 wanted_skills=()
 wanted_extensions=()
 wanted_codex_monitor=false
+wanted_codex_launcher=false
 
 usage() {
   cat <<'EOF'
@@ -21,6 +22,7 @@ Options:
   --skill NAME       Select this skill (repeatable)
   --extension NAME   Select this extension (repeatable)
   --codex-monitor    Select the codex-monitor CLI
+  --codex-launcher   Select codexr and the direct/Mise helpers (not plain codex)
   --pi               Install Pi links even if ~/.pi/agent does not exist
   --no-pi            Do not install Pi links
   -y, --yes          Apply without the confirmation prompt
@@ -75,6 +77,9 @@ while (($#)); do
     --codex-monitor)
       wanted_codex_monitor=true
       ;;
+    --codex-launcher)
+      wanted_codex_launcher=true
+      ;;
     -h|--help)
       usage
       exit 0
@@ -92,6 +97,8 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 shared_root="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 codex_root="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 local_bin_root="${LOCAL_BIN_DIR:-$HOME/.local/bin}"
+agent_bin_root="${AGENT_BIN_DIR:-$HOME/.local/agent-bin}"
+bashrc_file="${BASHRC_FILE:-$HOME/.bashrc}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
@@ -122,6 +129,7 @@ done
 
 selected_any=$(( ${#wanted_skills[@]} + ${#wanted_extensions[@]} ))
 "$wanted_codex_monitor" && selected_any=$((selected_any + 1))
+"$wanted_codex_launcher" && selected_any=$((selected_any + 1))
 
 if (( ${#wanted_skills[@]} > 0 )); then
   skills=()
@@ -154,7 +162,7 @@ if "$wanted_codex_monitor" || (( selected_any == 0 )); then
   install_codex_monitor=true
 fi
 
-if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )) && ! "$install_codex_monitor"; then
+if (( ${#skills[@]} == 0 && ${#extensions[@]} == 0 )) && ! "$install_codex_monitor" && ! "$wanted_codex_launcher"; then
   printf 'Nothing selected to install.\n'
   exit 0
 fi
@@ -337,6 +345,29 @@ show_plan() {
 
   printf 'Install plan:\n'
 
+  if "$wanted_codex_launcher"; then
+    if link_points_to "$repo_root/codex-launcher/codex" "$agent_bin_root/codex"; then
+      changes=$((changes + 1))
+      printf '  [migrate] owned obsolete codex link to agent-bin-backups/%s/codex\n' "$timestamp"
+    fi
+    for name in codexr codex-direct codex-mise; do
+      if same_target "$repo_root/codex-launcher/$name" "$agent_bin_root/$name"; then
+        printf '  [skip]    codex launcher %s (already installed)\n' "$name"
+      else
+        changes=$((changes + 1))
+        plan_entry 'codex launcher' "$name" "$repo_root/codex-launcher/$name" \
+          "$agent_bin_root/$name" "$(dirname -- "$agent_bin_root")/agent-bin-backups/$timestamp"
+      fi
+    done
+    shell_line="[[ -r \"$repo_root/codex-launcher/path.bash\" ]] && source \"$repo_root/codex-launcher/path.bash\""
+    if [[ -f "$bashrc_file" ]] && grep -Fqx -- "$shell_line" "$bashrc_file"; then
+      printf '  [skip]    bash PATH integration (already installed)\n'
+    else
+      changes=$((changes + 1))
+      printf '  [install] bash PATH integration at end of %s\n' "$bashrc_file"
+    fi
+  fi
+
   if "$install_codex_monitor"; then
     if same_target "$repo_root/codex-monitor/bin/codex-monitor.mjs" "$local_bin_root/codex-monitor"; then
       printf '  [skip]    codex-monitor (already installed)\n'
@@ -441,6 +472,27 @@ if "$install_codex_monitor"; then
     exit 1
   fi
 fi
+if "$wanted_codex_launcher"; then
+  for source in codexr codex-direct codex-mise path.bash; do
+    if [[ ! -f "$repo_root/codex-launcher/$source" ]]; then
+      printf 'Missing Codex launcher file: %s\n' "$repo_root/codex-launcher/$source" >&2
+      exit 1
+    fi
+  done
+  for source in codexr codex-direct codex-mise; do
+    if [[ ! -x "$repo_root/codex-launcher/$source" ]]; then
+      printf 'Codex launcher is not executable: %s\n' "$repo_root/codex-launcher/$source" >&2
+      exit 1
+    fi
+  done
+  preflight "$agent_bin_root" "$repo_root/codex-launcher" "Codex launcher paths" codexr codex-direct codex-mise
+  # Never put an unrelated plain codex ahead of the user's native executable.
+  if [[ -e "$agent_bin_root/codex" || -L "$agent_bin_root/codex" ]] &&
+    ! link_points_to "$repo_root/codex-launcher/codex" "$agent_bin_root/codex"; then
+    printf 'Refusing PATH integration: unowned codex in %s (left untouched).\n' "$agent_bin_root" >&2
+    exit 1
+  fi
+fi
 
 install_pi=false
 case "$pi_mode" in
@@ -477,6 +529,25 @@ fi
 confirm
 
 migrate_codex_duplicates
+if "$wanted_codex_launcher"; then
+  install_links "$agent_bin_root" "$repo_root/codex-launcher" "agent-bin-backups" codexr codex-direct codex-mise
+  if link_points_to "$repo_root/codex-launcher/codex" "$agent_bin_root/codex"; then
+    backup_root="$(dirname -- "$agent_bin_root")/agent-bin-backups/$timestamp"
+    mkdir -p -- "$backup_root"
+    mv -- "$agent_bin_root/codex" "$backup_root/codex"
+    printf 'Backed up owned obsolete codex link: %s/codex\n' "$backup_root"
+  fi
+  shell_line="[[ -r \"$repo_root/codex-launcher/path.bash\" ]] && source \"$repo_root/codex-launcher/path.bash\""
+  if [[ ! -f "$bashrc_file" ]] || ! grep -Fqx -- "$shell_line" "$bashrc_file"; then
+    if [[ -f "$bashrc_file" ]]; then
+      cp -p -- "$bashrc_file" "$bashrc_file.backup.$timestamp"
+    else
+      mkdir -p -- "$(dirname -- "$bashrc_file")"
+    fi
+    printf '\n# agent-stuff Codex launcher (keep after Omarchy/Mise initialization)\n%s\n' "$shell_line" >> "$bashrc_file"
+    printf 'Installed PATH integration: %s\n' "$bashrc_file"
+  fi
+fi
 if "$install_codex_monitor"; then
   mkdir -p -- "$local_bin_root"
   if ! same_target "$repo_root/codex-monitor/bin/codex-monitor.mjs" "$local_bin_root/codex-monitor"; then

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec "${CODEX_LAUNCHER_STANDALONE_BIN:-$HOME/.local/lib/codex-standalone-bin/codex}" "$@"

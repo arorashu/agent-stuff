@@ -145,6 +145,7 @@ installed. You can combine and repeat selectors.
 ./install.sh --extension async-monitor
 ./install.sh --extension pi-deepseek-websearch
 ./install.sh --codex-monitor --backup-existing
+./install.sh --codex-launcher
 ./install.sh --skill article-html --extension work-timer.ts -y
 ```
 
@@ -172,6 +173,54 @@ make install SKILL=async-monitor ARGS="--dry-run"
 
 Current Codex builds discover `~/.agents/skills`, so the installer does
 not also link under `~/.codex/skills`.
+
+## Opt-in shared-local Codex TUI launcher
+
+`./install.sh --codex-launcher` (or `make install-codex-launcher`) installs
+`codexr`, `codex-direct`, and `codex-mise` under `~/.local/agent-bin`. **Plain
+`codex` stays native**, and existing personal aliases are not changed.
+
+```bash
+codexr                                    # shared local TUI
+codexr -- -m MODEL -c model_reasoning_effort=high 'fix it'
+codexr -- resume --last
+codexr -- fork --last
+codexr -- agents
+codexr --help                             # wrapper help, no daemon startup
+codexr -- resume --help                    # native help, no daemon startup
+```
+
+`codexr` runs the standalone `app-server daemon start` and `codex-monitor daemon
+start` commands (both idempotent), then connects via `--remote unix://`. It never
+restarts services or alters approval/sandbox defaults. Install the monitor
+separately with `./install.sh --codex-monitor` if needed. The standalone binary
+must support `--remote` and `app-server daemon start`.
+
+The interface is deliberately narrow: all native **interactive TUI** arguments
+must follow the wrapper's `--`. Use native `codex` for noninteractive commands.
+Before a second, native `--`, `--remote`, `--remote-auth-token-env` (including
+`=value` forms), and `--no-daemon` are reserved and rejected, even after
+`resume`/`fork` or when used as option values. Use native `codex` for those
+options; the launcher never silently overrides them. Native help/version flags
+before that terminator pass through without starting either daemon. Use a
+native `--` when a prompt is literally a reserved flag:
+`codexr -- -- --remote`.
+
+The direct/Mise helpers retain explicit executable selection for existing users:
+`codex-direct` invokes `~/.local/lib/codex-standalone-bin/codex`, whereas
+`codex-mise` invokes `/usr/bin/mise x codex -- codex ...`, without PATH recursion.
+Tests can override these with `CODEX_LAUNCHER_STANDALONE_BIN`,
+`CODEX_LAUNCHER_MONITOR_BIN`, and `CODEX_LAUNCHER_MISE_BIN`.
+
+The installer appends an idempotent source hook after Omarchy/Mise initialization
+in `~/.bashrc`, backing up that file before modification. The hook moves
+agent-bin to the front of PATH and removes duplicate entries. `AGENT_BIN_DIR`
+and `BASHRC_FILE` override the install destinations (keep `AGENT_BIN_DIR` set
+when sourcing the hook for a custom directory). An obsolete `agent-bin/codex`
+link is backed up **only** if it points exactly to this repo's former launcher;
+an unrelated `codex` there blocks installation and is left untouched. Existing
+hooks and helper links are retained. No services or phone pairing are changed.
+This selector is opt-in, not part of the default installation.
 
 The installer never overwrites existing files or links. Conflicts —
 including same-named copies under `~/.codex/skills` — can be moved aside

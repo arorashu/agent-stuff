@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+standalone_codex="${CODEX_LAUNCHER_STANDALONE_BIN:-$HOME/.local/lib/codex-standalone-bin/codex}"
+monitor_bin="${CODEX_LAUNCHER_MONITOR_BIN:-$HOME/.local/bin/codex-monitor}"
+
+usage() {
+  printf '%s\n' \
+    'Usage: codexr [--help | --version] [-- CODEX_TUI_ARGS...]' \
+    'Start the shared local app-server and monitor, then connect via --remote unix://.' \
+    'Examples: codexr; codexr -- -m MODEL "prompt"; codexr -- resume --last' \
+    'Only interactive TUI arguments (including resume, fork, agents) are supported.' \
+    'Use native codex for other commands, explicit remotes, or --no-daemon.' \
+    'Connection flags are reserved before the native --, even as option values.'
+}
+
+if (($#)); then
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -V|--version) exec "$standalone_codex" --version ;;
+    --) shift ;;
+    *) usage >&2; exit 2 ;;
+  esac
+fi
+
+# This is intentionally not a Codex subcommand/option-value parser. Native
+# arguments require the separator, and connection-control tokens are reserved
+# anywhere before the native option terminator (including after resume/fork).
+terminal_option=false
+for arg in "$@"; do
+  case "$arg" in
+    --) break ;;
+    --remote|--remote=*|--remote-auth-token-env|--remote-auth-token-env=*|--no-daemon|--no-daemon=*)
+      printf 'codexr is shared-local only; use native codex for %s.\n' "$arg" >&2
+      exit 2
+      ;;
+    -h|--help|-V|--version) terminal_option=true ;;
+  esac
+done
+
+# Native help (e.g. resume --help) is safe and must not start daemons.
+if "$terminal_option"; then
+  exec "$standalone_codex" "$@"
+fi
+
+"$standalone_codex" app-server daemon start
+CODEX_MONITOR_CODEX_BIN="$standalone_codex" "$monitor_bin" daemon start
+exec "$standalone_codex" --remote unix:// "$@"
