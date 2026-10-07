@@ -3,10 +3,6 @@ import { createHash, randomBytes } from "node:crypto";
 
 const WS_ACCEPT_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-function sleep(ms) {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-}
-
 export class RpcError extends Error {
   constructor(message, detail) {
     super(message);
@@ -33,6 +29,7 @@ class WebSocketOverStdio {
     this.connectReject = null;
     this.timer = null;
 
+    this.input.on("error", (err) => this.#handleError(err));
     this.output.on("data", (chunk) => this.#handleData(chunk));
     this.output.on("close", () => this.#handleClose());
     this.output.on("error", (err) => this.#handleError(err));
@@ -70,10 +67,13 @@ class WebSocketOverStdio {
   }
 
   close() {
+    clearTimeout(this.timer);
+    this.timer = null;
     if (this.closed) return;
     this.closed = true;
+    this.connectReject?.(new Error("WebSocket transport closed before upgrade completed"));
     try {
-      this.#sendFrame(0x8, Buffer.alloc(0));
+      if (this.connected) this.#sendFrame(0x8, Buffer.alloc(0));
     } catch {
       // Best effort close.
     }
@@ -356,12 +356,53 @@ export class AppServerClient {
     });
   }
 
-  async close() {
-    if (this.closed) return;
+  close() {
+    if (this.closePromise) return this.closePromise;
+    // Protocol closure and child-process disposal are independent states.
     this.closed = true;
+    this.#rejectAll(new Error("app-server client is closing"));
     this.transport.close();
-    await sleep(100);
-    if (!this.proc.killed) this.proc.kill("SIGTERM");
+    this.closePromise = new Promise((resolvePromise, rejectPromise) => {
+      const proc = this.proc;
+      let timer = null;
+      const finish = (error = null) => {
+        clearTimeout(timer);
+        proc.removeListener("close", onClose);
+        error ? rejectPromise(error) : resolvePromise();
+      };
+      const onClose = () => finish();
+      proc.once("close", onClose);
+      // Stream destruction releases the parent's pipe descriptors on error paths too.
+      proc.stdin?.destroy();
+      proc.stdout?.destroy();
+      proc.stderr?.destroy();
+      if (!proc.pid) {
+        finish();
+        return;
+      }
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        finish();
+        return;
+      }
+      try {
+        proc.kill("SIGTERM");
+      } catch (err) {
+        finish(err);
+        return;
+      }
+      timer = setTimeout(() => {
+        try {
+          if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+        } catch (err) {
+          finish(err);
+          return;
+        }
+        timer = setTimeout(() => {
+          finish(new Error("app-server proxy did not close after SIGKILL"));
+        }, 1000);
+      }, 1000);
+    });
+    return this.closePromise;
   }
 
   #handleMessage(text) {

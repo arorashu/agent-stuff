@@ -106,3 +106,15 @@ This avoids the failure mode where a proxy listener misses `turn/completed` even
 - `src/thread-send.mjs`: sender validation, payload construction, direct-send transport.
 - `src/thread-delivery.mjs`: thread read helpers and delivery readback confirmation.
 - `test/e2e-tmux.mjs`: optional e2e probe against a tmux-visible Codex thread.
+
+## Proxy cleanup regression
+
+`npm test` also exercises direct transport cleanup with disposable fake proxy
+children. It covers failed upgrades, early closes, handshake deadlines, normal
+RPC delivery, spawn failures, concurrent close, and a proxy ignoring SIGTERM.
+No live app-server is contacted. The parent pipe count must remain stable and
+every owned fake proxy must exit before a client call finishes. FD counting uses
+`/proc/self/fd` on Linux and `lsof` on macOS. The handshake deadline cases take
+about 20 seconds. Child disposal is independent of protocol closure: cleanup
+destroys pipe streams, awaits proxy closure, and escalates from SIGTERM to SIGKILL
+with bounded deadlines if necessary.
