@@ -83,7 +83,14 @@ try {
 	now = 1_700;
 	await agentSettled({}, timerCtx);
 	assert(intervalClears === 1, "settling must stop the work timer");
-	assert(notices.at(-1) === "Work time: 0:01", "settling must emit the final UI-only duration");
+	const completionTime = new Intl.DateTimeFormat(undefined, {
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(new Date(now));
+	assert(
+		notices.at(-1) === `Work time: 0:01 • Completed at ${completionTime}`,
+		"settling must emit the final duration and concise local timestamp in the UI",
+	);
 	assert(statuses.at(-1)?.[1] === "✓ 0:01", "settling must retain the final footer duration");
 
 	await sessionShutdown({}, timerCtx);

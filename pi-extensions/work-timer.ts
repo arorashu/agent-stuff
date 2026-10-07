@@ -6,6 +6,7 @@
  *
  * - While the agent is running: live elapsed timer, e.g. "⏱ 0:03"
  * - When the agent finishes: final duration, e.g. "✓ 0:12"
+ * - On completion: UI-only notice with duration and local time, e.g. "Completed at 4:37 PM"
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -23,6 +24,13 @@ function formatDuration(ms: number): string {
 	const minutes = Math.floor(totalSeconds / 60);
 	const seconds = totalSeconds % 60;
 	return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatCompletionTime(date: Date): string {
+	return new Intl.DateTimeFormat(undefined, {
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(date);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -82,10 +90,14 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_settled", async (_event, ctx) => {
 		if (!running) return;
 
-		const duration = formatDuration(Math.max(0, Date.now() - startTime));
+		const completedAtMs = Date.now();
+		const completedAt = new Date(completedAtMs);
+		const duration = formatDuration(Math.max(0, completedAtMs - startTime));
 		stopTimer();
 		updateStatus(ctx, true);
-		if (ctx.hasUI) ctx.ui.notify(`Work time: ${duration}`, "info");
+		if (ctx.hasUI) {
+			ctx.ui.notify(`Work time: ${duration} • Completed at ${formatCompletionTime(completedAt)}`, "info");
+		}
 	});
 
 	// NOTE: We intentionally do NOT reset on steering messages.

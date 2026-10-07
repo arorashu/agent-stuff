@@ -39,7 +39,7 @@ summarizer calls; see the guide for model selection, costs, caching and limits.
 | `pi-deepseek-websearch` | Register a `deepseek_search` tool that runs DeepSeek's server-side web search | DeepSeek key (`/login` or `DEEPSEEK_API_KEY`); Pi |
 | `session-id-status` | Show the current session ID in Pi's default footer | Pi |
 | `tps` | Show current and session-average generation speed in Pi's footer | Pi |
-| `work-timer` | Show live and final agent work duration in Pi's footer | Pi |
+| `work-timer` | Show live/final work duration and a concise local completion time in Pi's UI | Pi |
 
 ## Codex monitor
 
