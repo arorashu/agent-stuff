@@ -8,42 +8,48 @@ import { pathToFileURL } from 'node:url';
 import { Store } from './lib/store.mjs';
 import { Compactor } from './lib/compactor.mjs';
 import { Engine } from './lib/engine.mjs';
-import { loadPi, createPiBackend } from './lib/pi.mjs';
+import { loadPi, createPiBackend, DEFAULT_MODEL } from './lib/pi.mjs';
+import { createTuiRuntime } from './lib/tui.mjs';
 
 const HELP = `opi — Pi with an OptChat history (separate from mpi)
 
 Usage: opi [options] [initial message]
        opi -p "message"
 
-  --model provider/id          Main model (default: Pi settings)
+  --model provider/id          Main model (default: openai-codex/gpt-6.1-sol)
   --compact-model provider/id  Summarizer (default: main model; costs extra)
   --thinking LEVEL            off, minimal, low, medium, high, xhigh, max
   --memory DIR                History (default: $XDG_DATA_HOME/optchat)
   --view-bytes N              Summary text budget (default: 128000)
   --tools read,bash,...        Built-in allowlist; zoom and date always enabled
   --pi-root DIR               Pi 1.0.2 npm package directory
+  --plain                     Use the simple line-oriented interface
+  --tui-mode MODE             Pi UI mode: regular or fullscreen
   --doctor                    Check SDK and paths without model calls
   -p, --print                  One turn, finish summaries, then exit
   -h, --help                   Show this help
 
-Interactive: /status, /view, /zoom ID N, /date ID, /flush, /exit.
-Ctrl-C cancels active work, or exits at the prompt. Messages typed while the
-agent is streaming steer it at tool boundaries. Pi TUI commands/extensions
-are not loaded. Model credentials, skills and context files come from Pi.
+Interactive terminals use the normal Pi UI; /memory shows OptChat commands.
+--plain uses /status, /view, /zoom ID N, /date ID, /flush, /exit.
+Credentials, themes, skills and context files come from Pi. Ordinary extensions
+remain disabled; session branching and manual compaction do not apply to OptChat.
 `;
 
 export async function main(argv = process.argv.slice(2)) {
   const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
     model: { type: 'string' }, 'compact-model': { type: 'string' }, thinking: { type: 'string', default: 'medium' },
     memory: { type: 'string' }, 'view-bytes': { type: 'string', default: '128000' }, tools: { type: 'string' },
+    plain: { type: 'boolean' }, 'tui-mode': { type: 'string' },
     'pi-root': { type: 'string' }, doctor: { type: 'boolean' }, print: { type: 'boolean', short: 'p' }, help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) { console.log(HELP); return; }
   if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(values.thinking)) throw new Error('Invalid --thinking level.');
+  if (values['tui-mode'] && !['regular', 'fullscreen'].includes(values['tui-mode'])) throw new Error('Invalid --tui-mode.');
+  const useTui = !values.print && !values.plain && process.stdin.isTTY;
   const directory = path.resolve(values.memory || process.env.OPI_MEMORY_DIR || path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'), 'optchat'));
   const pi = await loadPi(values['pi-root']);
   if (values.doctor) {
-    console.log(`Pi SDK: ${pi.version}\nPackage: ${pi.root}\nHistory: ${directory}\nHistory exists: ${fs.existsSync(directory)}\nNo model calls made.`);
+    console.log(`Pi SDK: ${pi.version}\nPackage: ${pi.root}\nHistory: ${directory}\nHistory exists: ${fs.existsSync(directory)}\nDefault model: ${process.env.OPI_MODEL || DEFAULT_MODEL}\nInterface: ${useTui ? "Pi UI" : "plain/print"}\nNo model calls made.`);
     return;
   }
   const prompt = positionals.join(' ');
@@ -61,6 +67,21 @@ export async function main(argv = process.argv.slice(2)) {
   });
   const store = await Store.open(directory, { budget: Number(values['view-bytes']) });
   const compactor = new Compactor(store, backend.complete);
+  if (useTui) {
+    if (pi.version !== '1.0.2') { await store.close(); throw new Error('The Pi UI requires Pi 1.0.2; use --plain with 0.87.1.'); }
+    let handle;
+    try {
+      const { getCurrentSystemMessage } = await import(pathToFileURL(path.join(pi.root, 'node_modules/@earendil-works/pi-ai/dist/utils/transcript.js')).href);
+      handle = await createTuiRuntime(backend, store, compactor, getCurrentSystemMessage);
+      compactor.pump();
+      const mode = new pi.sdk.InteractiveMode(handle.host, { initialMessage: prompt || undefined, tuiMode: values['tui-mode'] });
+      await mode.run();
+    } finally {
+      if (handle) { await handle.host.dispose(); await handle.cleanup(); }
+      else { await compactor.close(); await store.close(); }
+    }
+    return;
+  }
   const engine = new Engine(store, compactor, backend);
   console.error(`OptChat: ${directory}\nMain: ${backend.model.provider}/${backend.model.id}\nSummarizer: ${backend.compressor.provider}/${backend.compressor.id} (background model calls)`);
   compactor.pump();

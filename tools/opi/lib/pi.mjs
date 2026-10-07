@@ -5,6 +5,16 @@ import { pathToFileURL } from 'node:url';
 import { MASTER } from './prompts.mjs';
 import { cachePayload, capText, messageEntries } from './cache.mjs';
 
+export const DEFAULT_MODEL = 'openai-codex/gpt-6.1-sol';
+
+export function protectMemorySettings(loader, settings) {
+  const reload = loader.reload.bind(loader);
+  loader.reload = async (...args) => {
+    await reload(...args);
+    settings.applyOverrides({ compaction: { enabled: false }, cacheWarming: 'off' });
+  };
+}
+
 export function findPiRoot(explicit = process.env.OPI_PI_ROOT) {
   if (explicit) return path.resolve(explicit);
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
@@ -50,7 +60,7 @@ export function memoryTools(store) {
 export function memoryExtension(view, systemSuffix = MASTER, api = 'anthropic-messages') {
   return pi => {
     pi.on('before_agent_start', event => ({ systemPrompt: `${event.systemPrompt}\n\n${systemSuffix}` }));
-    pi.on('context', event => {
+    if (view !== null) pi.on('context', event => {
       const messages = [...event.messages];
       const index = messages.findIndex(m => m.role === 'user');
       if (index < 0) throw new Error('Fresh OptChat turn has no user message.');
@@ -59,7 +69,7 @@ export function memoryExtension(view, systemSuffix = MASTER, api = 'anthropic-me
       messages[index] = { ...first, content: [{ type: 'text', text: view }, ...content] };
       return { messages };
     });
-    pi.on('before_provider_request', event => api === 'anthropic-messages' ? cachePayload(event.payload) : event.payload);
+    pi.on('before_provider_request', (event, ctx) => (ctx?.model?.api ?? api) === 'anthropic-messages' ? cachePayload(event.payload) : event.payload);
     pi.on('cache_warming_decision', () => ({ action: 'stop' }));
     pi.on('tool_result', event => {
       if (event.toolName === 'zoom' || event.toolName === 'date') return;
@@ -72,6 +82,10 @@ export function memoryExtension(view, systemSuffix = MASTER, api = 'anthropic-me
 
 export async function createPiBackend({ sdk, cwd = process.cwd(), agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi/agent'), model: choice, compactModel, thinking = 'medium', tools, runtime, onText = text => process.stdout.write(text), onTool = () => {}, onUsage = () => {} } = {}) {
   const settings = sdk.SettingsManager.create(cwd, agentDir);
+  // Pi 1.0 reads warming from global settings, bypassing applyOverrides.
+  // Keep these policies local to this harness, including after UI reloads.
+  settings.getCacheWarmingMode = () => 'off';
+  settings.getCompactionEnabled = () => false;
   settings.applyOverrides({ compaction: { enabled: false }, cacheWarming: 'off' });
   runtime ??= await sdk.ModelRuntime.create({ authPath: path.join(agentDir, 'auth.json'), modelsPath: path.join(agentDir, 'models.json') });
   function resolve(name) {
@@ -81,19 +95,14 @@ export async function createPiBackend({ sdk, cwd = process.cwd(), agentDir = pro
     if (!model) throw new Error(`Model not found in Pi: ${name}. Run pi --list-models to see available models.`);
     return model;
   }
-  let model;
-  if (choice) model = resolve(choice);
-  else {
-    const provider = settings.getDefaultProvider(), id = settings.getDefaultModel();
-    if (provider && id) model = runtime.getModel(provider, id);
-    if (!model) throw new Error('Choose --model provider/model (or configure a valid default in Pi).');
-  }
+  const model = resolve(choice || process.env.OPI_MODEL || DEFAULT_MODEL);
   const compressor = compactModel ? resolve(compactModel) : model;
   for (const selected of [model, compressor]) {
     if (!runtime.hasConfiguredAuth(selected.provider) && !await runtime.checkAuth(selected.provider)) throw new Error(`No Pi credentials for ${selected.provider}; run pi and log in first.`);
   }
   return {
     model, compressor,
+    sdk, settings, runtime, cwd, agentDir, thinking, tools,
     async complete(context, signal) {
       return runtime.completeSimple(compressor, context, {
         signal, reasoning: 'medium', cacheRetention: 'short',
@@ -107,6 +116,7 @@ export async function createPiBackend({ sdk, cwd = process.cwd(), agentDir = pro
         noExtensions: true, noThemes: true, noPromptTemplates: true,
         extensionFactories: [memoryExtension(view, MASTER, model.api)],
       });
+      protectMemorySettings(loader, settings);
       await loader.reload();
       const errors = loader.getExtensions().errors;
       if (errors.length) throw new Error(`Memory extension failed to load: ${JSON.stringify(errors)}`);
