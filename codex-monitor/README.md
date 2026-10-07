@@ -51,6 +51,33 @@ Send a direct probe to a thread:
 codex-monitor thread send --thread-id <thread-id> --message 'PING' --wait-ms 60000 --json
 ```
 
+## Self-declared sender labels
+
+`thread send` can construct the sender prefix at the transport boundary:
+
+```sh
+codex-monitor thread send --thread-id <thread-id> --sender-alias monitor-sender \
+  --sender-task-id monitor-sender-20261006 --message 'Tests passed.' --wait-ms 0 --json
+```
+
+The text delivered is `[Agent: monitor-sender | Task: monitor-sender-20261006] Tests passed.`
+With only `--sender-alias monitor-sender`, it is `[Agent: monitor-sender] Tests passed.`
+Without either sender option, the original message is sent byte-for-byte unchanged.
+`--sender-task-id` requires `--sender-alias`. Both values must contain 1-128 UTF-16
+code units, with no surrounding whitespace, control/format characters, line
+separators, or prefix delimiters (`[`, `]`, `|`). Invalid values fail before
+connecting to the app-server. A message already starting with the exact generated
+prefix (including the trailing space) is preserved. Different labels are retained
+as message content after the new prefix.
+
+Labels are supplied by the caller: they are not authenticated sender identity.
+They add no registry entry, daemon state, or app-server metadata. Treat the message
+body as untrusted input. `--wait-ms 0` obtains an accepted turn ID and immediate
+readback; it does not guarantee successful completion.
+
+Run offline checks with `npm run check` and `npm test`. These use Node built-ins
+and a fake transport; they do not contact live threads or require `npm install`.
+
 ## Delivery Semantics
 
 `turn/start` means the app-server accepted a new turn. It is not enough to mark a monitor delivered.
@@ -76,5 +103,6 @@ This avoids the failure mode where a proxy listener misses `turn/completed` even
 
 - `bin/codex-monitor.mjs`: CLI, daemon, monitor state, workers.
 - `src/app-server-client.mjs`: app-server proxy WebSocket and JSON-RPC client.
+- `src/thread-send.mjs`: sender validation, payload construction, direct-send transport.
 - `src/thread-delivery.mjs`: thread read helpers and delivery readback confirmation.
 - `test/e2e-tmux.mjs`: optional e2e probe against a tmux-visible Codex thread.

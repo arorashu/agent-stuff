@@ -35,6 +35,8 @@ import {
   waitForTurnReadback,
 } from "../src/thread-delivery.mjs";
 
+import { prepareThreadSend, sendThreadMessage } from "../src/thread-send.mjs";
+
 const VERSION = "0.2.0";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const HOME = process.env.HOME ?? "/tmp";
@@ -78,7 +80,7 @@ Usage:
   codex-monitor cancel <monitor-id>
   codex-monitor thread start [--cwd DIR] [--json]
   codex-monitor thread list [--cwd DIR] [--limit N] [--json]
-  codex-monitor thread send --thread-id ID --message TEXT [--wait-ms N] [--json]
+  codex-monitor thread send --thread-id ID --message TEXT [--sender-alias ALIAS] [--sender-task-id ID] [--wait-ms N] [--json]
   codex-monitor thread turns --thread-id ID [--limit N] [--json]
   codex-monitor thread read --thread-id ID [--json]
 
@@ -90,6 +92,8 @@ Check exit codes:
   other nonzero: transient monitor error; terminal after 3 consecutive occurrences
 
 Notes:
+  thread send sender fields add a self-declared label, not authenticated identity.
+  --sender-task-id requires --sender-alias; sender labels must be single-line and exclude [, ], and |.
   start observes a condition; it does not make external work durable.
   run asks the daemon to launch the work, so it survives the Codex shell command that requested it.
 `;
@@ -1300,6 +1304,14 @@ async function cmdCancel(argv) {
 async function cmdThread(argv) {
   const [action, ...rest] = argv;
   const { flags } = parseFlags(rest);
+  let sendOptions = null;
+  if (action === "send") {
+    try {
+      sendOptions = prepareThreadSend(flags);
+    } catch (err) {
+      throw new CliError(err.message);
+    }
+  }
   const socket = await resolveSocket(flags);
   if (action === "start") {
     const cwd = resolve(flagString(flags, "cwd", process.cwd()));
@@ -1323,42 +1335,7 @@ async function cmdThread(argv) {
     return;
   }
   if (action === "send") {
-    const threadId = flagString(flags, "thread-id");
-    const message = flagString(flags, "message");
-    if (!threadId || !message) throw new CliError("thread send requires --thread-id and --message");
-    const waitMs = flagNumber(flags, "wait-ms", 120000);
-    const output = await withClient(socket, async (client) => {
-      const start = await client.request("turn/start", { threadId, input: [{ type: "text", text: message }] }, 30000);
-      const turnId = getTurnId(start.turn);
-      let completed = null;
-      try {
-        completed = await client.waitForNotification(
-          (event) => event.method === "turn/completed" &&
-            event.params?.threadId === threadId &&
-            getTurnId(event.params?.turn) === turnId,
-          Math.min(waitMs, DELIVERY_WAIT_MS),
-        );
-      } catch (err) {
-        completed = { error: String(err.message ?? err) };
-      }
-      const readback = await waitForTurnReadback(client, {
-        threadId,
-        turnId,
-        token: message,
-        timeoutMs: waitMs,
-        terminalOnly: true,
-      });
-      const readbackStatus = readback?.status ?? null;
-      return {
-        threadId,
-        turnId,
-        start,
-        completed,
-        readback,
-        confirmedStatus: readbackStatus,
-        deliveryState: readbackStatus ? deliveryStatusFromTurnStatus(readbackStatus) : "unconfirmed",
-      };
-    });
+    const output = await withClient(socket, (client) => sendThreadMessage(client, sendOptions));
     flagBool(flags, "json") ? printJson(output) : process.stdout.write(`turn: ${output.turnId}\n`);
     return;
   }
