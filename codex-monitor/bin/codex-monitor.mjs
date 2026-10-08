@@ -20,7 +20,9 @@ import {
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { RpcError, withClient } from "../src/app-server-client.mjs";
+import { classifyWatchdogResult } from "../src/check-watchdog.mjs";
 import {
   applyDeliveryTurnResult,
   deliveryStatusFromTurnStatus,
@@ -55,6 +57,10 @@ const DEFAULT_TIMEOUT_SEC = 3600;
 const DEFAULT_CHECK_TIMEOUT_SEC = 60;
 const DELIVERY_WAIT_MS = 10000;
 const DELIVERY_READBACK_WAIT_MS = 30000;
+const WATCHDOG_PATH_DEFAULT = fileURLToPath(new URL("../src/check-watchdog.mjs", import.meta.url));
+const MAX_TIMER_MS = 2 ** 31 - 2;
+const BACKSTOP_MARGIN_MS = 5000;
+const BACKSTOP_ESCALATION_MS = 3000;
 const TERMINAL_MONITOR_STATES = new Set(["success", "failure", "error", "cancelled", "timeout"]);
 const DELIVERABLE_MONITOR_STATES = new Set(["success", "failure", "error", "timeout"]);
 const SECRET_ENV_RE = /(KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL|COOKIE|AUTH)/i;
@@ -831,35 +837,73 @@ async function appendLog(monitor, text) {
   await chmod(monitor.log_path, 0o600).catch(() => {});
 }
 
-function runCheckCommand(monitor) {
+function runCheckCommand(monitor, { watchdogPath = WATCHDOG_PATH_DEFAULT } = {}) {
   return new Promise((resolvePromise) => {
     const command = monitor.command;
-    const child = spawn(command[0], command.slice(1), {
+    const checkTimeoutMs = Number(monitor.check_timeout_sec) * 1000;
+    // The watchdog owns the deadline (survives daemon death); the daemon keeps
+    // only a backstop on the watchdog itself plus the command group it reports.
+    const child = spawn(process.execPath, [watchdogPath, String(checkTimeoutMs), ...command], {
       cwd: monitor.cwd,
       env: monitor.env,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
-    let killed = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      killed = true;
+    let settled = false;
+    let backstopFired = false;
+    let backstopEscalation = null;
+    const statusLines = [];
+    let pendingStatus = "";
+    const parseStatusLine = (line) => {
       try {
-        process.kill(-child.pid, "SIGTERM");
+        return JSON.parse(line);
       } catch {
-        // Process may have exited.
+        return null;
       }
-      setTimeout(() => {
-        try {
-          process.kill(-child.pid, "SIGKILL");
-        } catch {
-          // Process may have exited.
+    };
+    const statusStream = child.stdio[3];
+    if (statusStream) {
+      statusStream.setEncoding("utf8");
+      statusStream.on("data", (chunk) => {
+        pendingStatus += chunk;
+        let idx;
+        while ((idx = pendingStatus.indexOf("\n")) !== -1) {
+          const line = pendingStatus.slice(0, idx).trim();
+          pendingStatus = pendingStatus.slice(idx + 1);
+          if (line) statusLines.push(line);
         }
-      }, 2000).unref();
-    }, Number(monitor.check_timeout_sec) * 1000);
+      });
+    }
+    const backstop = setTimeout(() => {
+      backstopFired = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // Watchdog may have exited.
+      }
+      // Escalation stays referenced: it is part of the cleanup obligation and
+      // must run even if the wrapper dies in response to the TERM above.
+      backstopEscalation = setTimeout(() => {
+        backstopEscalation = null;
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Watchdog may have exited.
+        }
+        // Independent group enforcement for a wedged watchdog that never
+        // completed its own cleanup.
+        const spawned = statusLines.map(parseStatusLine).find((status) => status?.kind === "spawned");
+        const pgroup = Number(spawned?.pgroup);
+        if (Number.isFinite(pgroup) && pgroup > 0) {
+          try {
+            process.kill(-pgroup, "SIGKILL");
+          } catch {
+            // Group may already be gone.
+          }
+        }
+      }, BACKSTOP_ESCALATION_MS);
+    }, Math.min(checkTimeoutMs + BACKSTOP_MARGIN_MS, MAX_TIMER_MS));
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString("utf8");
       if (stdout.length > 20000) stdout = stdout.slice(-20000);
@@ -869,19 +913,40 @@ function runCheckCommand(monitor) {
       if (stderr.length > 20000) stderr = stderr.slice(-20000);
     });
     child.on("error", (err) => {
-      clearTimeout(timeout);
+      if (settled) return;
+      settled = true;
+      clearTimeout(backstop);
+      if (backstopEscalation) clearTimeout(backstopEscalation);
       resolvePromise({
         exitCode: err.code === "ENOENT" ? 127 : 126,
         stdout,
         stderr: `${stderr}${stderr ? "\n" : ""}${err.message}\n`,
-        timedOut,
+        timedOut: false,
         logText: `[codex-monitor] failed to spawn: ${err.message}\n`,
       });
     });
-    child.on("exit", (code, signal) => {
-      clearTimeout(timeout);
-      const exitCode = timedOut ? 124 : (code ?? (signal ? 128 : 1));
-      const logText = `${stdout}${stderr ? `${stdout && !stdout.endsWith("\n") ? "\n" : ""}${stderr}` : ""}[codex-monitor] check exit=${exitCode} signal=${signal ?? ""}${timedOut ? " timed_out=true" : ""}${killed ? " killed=true" : ""}\n`;
+    // Finalize on `close` so watchdog output is fully consumed before the
+    // monitor state is written.
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(backstop);
+      if (backstopEscalation && !backstopFired) clearTimeout(backstopEscalation);
+      const finalStatus = statusLines.length ? parseStatusLine(statusLines.at(-1)) : null;
+      const classified = classifyWatchdogResult({ status: finalStatus, exitCode: code, signal, backstopFired });
+      const exitCode = classified.exitCode;
+      const timedOut = classified.timedOut;
+      let logText;
+      if (classified.spawnError) {
+        logText = `[codex-monitor] failed to spawn: ${classified.spawnError}\n`;
+      } else {
+        const commandSignal = finalStatus?.kind === "exit" || finalStatus?.kind === "timeout"
+          ? (finalStatus.signal ?? "")
+          : finalStatus?.kind === "watchdog_signal"
+            ? (finalStatus.signal ?? "")
+            : (signal ?? "");
+        logText = `${stdout}${stderr ? `${stdout && !stdout.endsWith("\n") ? "\n" : ""}${stderr}` : ""}[codex-monitor] check exit=${exitCode} signal=${commandSignal}${timedOut ? " timed_out=true killed=true" : ""}${classified.drainIncomplete ? " drain_incomplete=true" : ""}${classified.protocolFailure ? ` protocol_failure=true wrapper_exit=${classified.rawExitCode ?? "unknown"}` : ""}${backstopFired ? " backstop=true" : ""}\n`;
+      }
       resolvePromise({ exitCode, stdout, stderr, timedOut, logText });
     });
   });
@@ -1050,6 +1115,8 @@ async function cmdStart(argv) {
   const intervalSec = flagNumber(flags, "interval", DEFAULT_INTERVAL_SEC);
   const timeoutSec = flagNumber(flags, "timeout", DEFAULT_TIMEOUT_SEC);
   const checkTimeoutSec = flagNumber(flags, "check-timeout", DEFAULT_CHECK_TIMEOUT_SEC);
+  if (timeoutSec <= 0) throw new CliError("--timeout must be > 0");
+  if (checkTimeoutSec <= 0) throw new CliError("--check-timeout must be > 0");
   const createdMs = nowMs();
   const monitor = {
     id,
@@ -1102,6 +1169,7 @@ async function cmdRun(argv) {
   const id = makeId("run");
   const intervalSec = flagNumber(flags, "interval", DEFAULT_RUN_INTERVAL_SEC);
   const timeoutSec = flagNumber(flags, "timeout", DEFAULT_TIMEOUT_SEC);
+  if (timeoutSec <= 0) throw new CliError("--timeout must be > 0");
   const createdMs = nowMs();
   const monitor = {
     id,
@@ -1398,11 +1466,24 @@ async function main(argv = process.argv.slice(2)) {
   throw new CliError(`unknown command: ${cmd}\n\n${usage()}`);
 }
 
-main().catch((err) => {
-  if (err instanceof CliError) {
-    process.stderr.write(`${err.message}\n`);
-    process.exit(err.code);
+export { runCheckCommand };
+
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
   }
-  process.stderr.write(`${err.stack ?? err.message ?? err}\n`);
-  process.exit(1);
-});
+}
+
+if (isMainModule()) {
+  main().catch((err) => {
+    if (err instanceof CliError) {
+      process.stderr.write(`${err.message}\n`);
+      process.exit(err.code);
+    }
+    process.stderr.write(`${err.stack ?? err.message ?? err}\n`);
+    process.exit(1);
+  });
+}

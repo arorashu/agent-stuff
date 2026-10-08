@@ -280,6 +280,11 @@ export class AppServerClient {
       timeoutMs: 10000,
     });
     this.ready = this.transport.connect();
+    // Mark the connect promise handled so a caller that never awaits ready
+    // (e.g. constructs and immediately closes) cannot crash the process via
+    // an unhandled rejection. Awaiting callers still receive the rejection;
+    // this must stay a reaction on the ORIGINAL promise, not a replacement.
+    this.ready.catch(() => {});
   }
 
   async initialize() {
@@ -343,11 +348,24 @@ export class AppServerClient {
         resolvePromise(existing);
         return;
       }
+      if (this.closed) {
+        rejectPromise(new Error("app-server client is closed"));
+        return;
+      }
+      const indefinite = timeoutMs === undefined || timeoutMs === null;
+      if (!indefinite && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs < 0)) {
+        rejectPromise(new TypeError(
+          `waitForNotification timeoutMs must be a finite number >= 0 or null/undefined, got ${String(timeoutMs)}`));
+        return;
+      }
+      // A finite timer larger than Node's max delay (2**31 - 1 ms) is clamped
+      // by Node and therefore behaves as nearly immediate; callers wanting to
+      // wait longer should omit the timeout (indefinite) instead.
       const waiter = {
         predicate,
         resolve: resolvePromise,
         reject: rejectPromise,
-        timer: setTimeout(() => {
+        timer: indefinite ? null : setTimeout(() => {
           this.waiters = this.waiters.filter((candidate) => candidate !== waiter);
           rejectPromise(new Error(`Timed out waiting for notification after ${timeoutMs}ms`));
         }, timeoutMs),
@@ -460,10 +478,32 @@ export class AppServerClient {
 
 export async function withClient(socket, fn, options = {}) {
   const client = new AppServerClient({ socket, ...options });
+  let operationError = null;
+  let operationFailed = false;
   try {
     await client.initialize();
     return await fn(client);
+  } catch (err) {
+    // Capture without normalizing: primitives and foreign rejection values
+    // must be rethrown exactly as-is (identity/prototype matters for
+    // `err instanceof RpcError` style handling in delivery code).
+    operationFailed = true;
+    operationError = err;
   } finally {
-    await client.close();
+    try {
+      await client.close();
+    } catch (closeError) {
+      if (!operationFailed) throw closeError;
+      // Best-effort annotation: must never throw or overwrite an existing
+      // cause; when it cannot apply, the original error still propagates.
+      try {
+        if (operationError instanceof Error && operationError.cause === undefined) {
+          operationError.cause = closeError;
+        }
+      } catch {
+        // Ignore annotation failures; preservation of the original error wins.
+      }
+    }
   }
+  if (operationFailed) throw operationError;
 }

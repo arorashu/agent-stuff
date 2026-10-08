@@ -48,6 +48,7 @@ process.stdin.on('data', data => {
     if (opcode !== 1) continue;
     const request = JSON.parse(body.toString());
     if (request.id !== undefined) textFrame({ id: request.id, result: { ok: true } });
+    if (request.method === 'push-notify') textFrame({ method: 'test/notify', params: {} });
   }
 });
 process.on('SIGTERM', () => {

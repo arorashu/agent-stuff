@@ -7,9 +7,9 @@
     "codex-monitor": "./bin/codex-monitor.mjs"
   },
   "scripts": {
-    "check": "node --check bin/codex-monitor.mjs && node --check src/app-server-client.mjs && node --check src/thread-delivery.mjs && node --check test/e2e-tmux.mjs && node --check src/thread-send.mjs && node --check test/thread-send.mjs && node --check test/app-server-cleanup.mjs && node --check test/fixtures/cleanup-proxy.mjs",
+    "check": "node --check bin/codex-monitor.mjs && node --check src/app-server-client.mjs && node --check src/thread-delivery.mjs && node --check src/check-watchdog.mjs && node --check test/e2e-tmux.mjs && node --check src/thread-send.mjs && node --check test/thread-send.mjs && node --check test/app-server-cleanup.mjs && node --check test/check-watchdog.mjs && node --check test/ready-unhandled-rejection.mjs && node --check test/fixtures/cleanup-proxy.mjs && node --check test/fixtures/idle-proxy.mjs",
     "doctor": "node bin/codex-monitor.mjs doctor",
     "e2e:tmux": "node test/e2e-tmux.mjs",
-    "test": "node --test test/thread-send.mjs && node test/app-server-cleanup.mjs"
+    "test": "node --test test/thread-send.mjs && node test/app-server-cleanup.mjs && node test/check-watchdog.mjs"
   }
 }
