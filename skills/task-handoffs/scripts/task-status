@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Atomic task state shared by implementation, review, and coordination workers."""
+
+import argparse
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+
+if not os.environ.get("TASK_STATUS_DIR") or not Path(os.environ["TASK_STATUS_DIR"]).is_absolute():
+    argparse.ArgumentParser().exit(20, "TASK_STATUS_DIR must be set to an absolute queue directory\n")
+ROOT = Path(os.environ["TASK_STATUS_DIR"])
+STATES = (
+    "running",
+    "ready_for_review",
+    "changes_requested",
+    "ready_for_security",
+    "security_changes_requested",
+    "ready_for_final",
+    "needs_coordinator",
+    "blocked",
+    "done",
+    "failed",
+)
+SHA = re.compile(r"[0-9a-f]{40}")
+TASK = re.compile(r"[a-z0-9][a-z0-9-]{1,80}")
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def path_for(task):
+    if not TASK.fullmatch(task):
+        raise ValueError("Task names must use lowercase letters, digits and hyphens")
+    return ROOT / f"{task}.json"
+
+
+@contextmanager
+def locked():
+    ROOT.mkdir(parents=True, exist_ok=True)
+    with (ROOT / ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def atomic(path, record):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(record, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def load(task):
+    path = path_for(task)
+    return json.loads(path.read_text()) if path.exists() else {"task": task, "revision": 0}
+
+
+def revision_matches(record, revision):
+    if record["revision"] != revision:
+        raise ValueError(f"Stale revision: expected {revision}, current {record['revision']}")
+
+
+def update(task, revision, state, fields):
+    if state not in STATES:
+        raise ValueError("Invalid state")
+    with locked():
+        record = load(task)
+        revision_matches(record, revision)
+        previous_head = record.get("head")
+        record.update(fields)
+        head = record.get("head")
+        if head is not None and not SHA.fullmatch(head):
+            raise ValueError("head must be a full commit SHA")
+        if state in ("running", "ready_for_review") or head != previous_head:
+            record.pop("verdict", None)
+            record.pop("reviewed_head", None)
+        review_states = {"changes_requested", "ready_for_security", "security_changes_requested", "ready_for_final"}
+        if state in review_states:
+            if fields.get("reviewed_head") != head or not head:
+                raise ValueError("Review transition requires reviewed_head equal to current head")
+            expected = "changes_requested" if state.endswith("changes_requested") else "approve"
+            if fields.get("verdict") != expected:
+                raise ValueError(f"Review transition requires verdict={expected}")
+            if previous_head != head:
+                raise ValueError("A reviewer cannot replace the implementation head")
+        if state in review_states | {"ready_for_review"} and (not head or not fields.get("report")):
+            raise ValueError("Handoff requires head and an explicit report path")
+        record.pop("claim", None)
+        record.update(state=state, revision=revision + 1, updated_at=now())
+        atomic(path_for(task), record)
+        return record
+
+
+def claim(task, revision, owner):
+    with locked():
+        record = load(task)
+        revision_matches(record, revision)
+        if record.get("claim"):
+            raise ValueError(f"Already claimed by {record['claim']['owner']}; inspect before release")
+        record["claim"] = {"owner": owner, "claimed_at": now(), "revision": revision}
+        atomic(path_for(task), record)
+        return record
+
+
+def release(task, revision, owner, retry_undelivered=False):
+    with locked():
+        record = load(task)
+        revision_matches(record, revision)
+        if record.get("claim", {}).get("owner") != owner:
+            raise ValueError("Claim owner does not match")
+        if owner in {"review", "implementation", "security", "coordinator"}:
+            ledger = ROOT / ".seen" / f"{owner}.json"
+            acknowledged = json.loads(ledger.read_text()) if ledger.exists() else {}
+            if acknowledged.get(task, 0) >= revision:
+                if not retry_undelivered:
+                    raise ValueError("Delivery acknowledged; inspect model acceptance then use --retry-undelivered only if not accepted")
+                acknowledged.pop(task)
+                # Clear ack first: interruption must retain the claim and block duplicate delivery.
+                atomic(ledger, acknowledged)
+        record.pop("claim")
+        atomic(path_for(task), record)
+        return record
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    setter = sub.add_parser("set")
+    setter.add_argument("task")
+    setter.add_argument("--revision", type=int, required=True)
+    setter.add_argument("--state", choices=STATES, required=True)
+    for field in ("head", "reviewed-head", "owner", "brief", "report", "summary", "pr", "worktree"):
+        setter.add_argument(f"--{field}")
+    setter.add_argument("--verdict", choices=("approve", "changes_requested"))
+    show = sub.add_parser("show")
+    show.add_argument("task", nargs="?")
+    for command in ("claim", "release"):
+        child = sub.add_parser(command)
+        child.add_argument("task")
+        child.add_argument("--revision", type=int, required=True)
+        child.add_argument("--owner", required=True)
+        if command == "release":
+            child.add_argument(
+                "--retry-undelivered", action="store_true", help="confirm the model did not accept this delivery; clear its acknowledgment"
+            )
+    args = parser.parse_args()
+    try:
+        if args.command == "set":
+            fields = {k: v for k, v in vars(args).items() if k not in {"command", "task", "revision", "state"} and v is not None}
+            print(json.dumps(update(args.task, args.revision, args.state, fields), indent=2))
+        elif args.command == "claim":
+            print(json.dumps(claim(args.task, args.revision, args.owner), indent=2))
+        elif args.command == "release":
+            print(json.dumps(release(args.task, args.revision, args.owner, args.retry_undelivered), indent=2))
+        else:
+            paths = [path_for(args.task)] if args.task else sorted(ROOT.glob("*.json"))
+            for path in paths:
+                if path.name != "routes.json" and path.exists():
+                    print(path.read_text().strip())
+    except (ValueError, OSError) as error:
+        parser.exit(20, f"{error}\n")
+
+
+if __name__ == "__main__":
+    main()

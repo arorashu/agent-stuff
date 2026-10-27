@@ -30,6 +30,7 @@ summarizer calls; see the guide for model selection, costs, caching and limits.
 | `article-html` | Turn a public web article into a self-contained reader HTML file with no banners or subscribe chrome | Network fetch (Jina reader first); clipboard `wl-paste` on this machine |
 | `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | This repository's `async-monitor` Pi extension and/or `codex-monitor` package |
 | `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
+| `task-handoffs` | Coordinate assigned worker and reviewer turns with atomic state and exact-head approvals | Python 3; explicit `TASK_STATUS_DIR`; Linux, tmux and exec-owned Pi panes for dispatch |
 
 ## Pi extensions
 

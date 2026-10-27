@@ -102,7 +102,7 @@ bashrc_file="${BASHRC_FILE:-$HOME/.bashrc}"
 pi_root="${PI_SKILLS_DIR:-$HOME/.pi/agent/skills}"
 pi_extensions_root="${PI_EXTENSIONS_DIR:-$HOME/.pi/agent/extensions}"
 timestamp=$(date +%Y%m%d-%H%M%S)
-all_skills=(article-html async-monitor launch-agents)
+all_skills=(article-html async-monitor launch-agents task-handoffs)
 all_extensions=(async-monitor pi-deepseek-websearch session-id-status.ts tps.ts work-timer.ts)
 
 for want in "${wanted_skills[@]}"; do

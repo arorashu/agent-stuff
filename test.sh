@@ -16,7 +16,7 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$repo_root"
 
 # Explicit expected inventory. Update when adding installable items.
-skills=(article-html async-monitor launch-agents)
+skills=(article-html async-monitor launch-agents task-handoffs)
 extensions=(async-monitor pi-deepseek-websearch session-id-status.ts tps.ts work-timer.ts)
 
 workspace() {
