@@ -30,6 +30,7 @@ summarizer calls; see the guide for model selection, costs, caching and limits.
 | `article-html` | Turn a public web article into a self-contained reader HTML file with no banners or subscribe chrome | Network fetch (Jina reader first); clipboard `wl-paste` on this machine |
 | `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | This repository's `async-monitor` Pi extension and/or `codex-monitor` package |
 | `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
+| `ui-proof-video` | Capture continuous UI proof with visible actions, captions, provenance, and delivery readback | Browser recording tools; FFmpeg/ffprobe; connected Google Drive for Drive delivery |
 
 ## Pi extensions
 

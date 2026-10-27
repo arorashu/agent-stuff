@@ -16,7 +16,7 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$repo_root"
 
 # Explicit expected inventory. Update when adding installable items.
-skills=(article-html async-monitor launch-agents)
+skills=(article-html async-monitor launch-agents ui-proof-video)
 extensions=(async-monitor pi-deepseek-websearch session-id-status.ts tps.ts work-timer.ts)
 
 workspace() {
@@ -98,6 +98,7 @@ plan_count=$(grep -c 'Install plan:' <<<"$out")
 if [[ "$rc" == 0 && "$plan_count" == 1 ]] \
   && grep -q 'cli codex-monitor' <<<"$out" \
   && grep -q 'skill async-monitor' <<<"$out" \
+  && grep -q 'skill ui-proof-video' <<<"$out" \
   && grep -q 'pi skill launch-agents' <<<"$out" \
   && grep -q 'extension async-monitor' <<<"$out" \
   && grep -q 'extension session-id-status.ts' <<<"$out" \
@@ -128,7 +129,7 @@ no_mutation "non-interactive abort leaves destination trees empty" "$tmp/w1/agen
 out=$(./install.sh --skill bogus -y 2>&1)
 rc=$?
 if [[ "$rc" == 2 ]] && grep -q 'Unknown skill: bogus' <<<"$out" \
-  && grep -q 'Valid skills: article-html async-monitor launch-agents' <<<"$out"; then
+  && grep -q 'Valid skills: article-html async-monitor launch-agents ui-proof-video' <<<"$out"; then
   ok "unknown skill rejected with valid list"
 else
   bad "unknown skill rejection (rc=$rc)"
