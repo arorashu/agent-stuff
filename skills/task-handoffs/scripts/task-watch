@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""One-shot task events or guarded tmux handoff; async_monitor owns scheduling."""
+
+import argparse
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import re
+import runpy
+import subprocess
+import sys
+
+store = runpy.run_path(str(Path(__file__).with_name("task-status")))
+ROOT = store["ROOT"]
+CONSUMERS = {
+    "review": {"ready_for_review"},
+    "implementation": {"changes_requested", "security_changes_requested"},
+    "security": {"ready_for_security"},
+    "coordinator": {"needs_coordinator", "blocked", "ready_for_final", "done", "failed"},
+}
+
+
+def seen_path(consumer):
+    return ROOT / ".seen" / f"{consumer}.json"
+
+
+def seen(consumer):
+    path = seen_path(consumer)
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def acknowledge(task, revision, consumer):
+    with store["locked"]():
+        record = store["load"](task)
+        store["revision_matches"](record, revision)
+        values = seen(consumer)
+        values[task] = revision
+        store["atomic"](seen_path(consumer), values)
+
+
+def events(consumer, stale_seconds=900):
+    delivered = seen(consumer)
+    result = []
+    for path in sorted(ROOT.glob("*.json")):
+        if path.name == "routes.json":
+            continue
+        record = json.loads(path.read_text())
+        if record["revision"] <= delivered.get(record["task"], 0):
+            continue
+        actionable = record["state"] in CONSUMERS[consumer]
+        if consumer == "coordinator" and (record["state"] == "running" or record.get("claim")):
+            stamp = record.get("claim", {}).get("claimed_at", record["updated_at"])
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds()
+            actionable = actionable or age >= stale_seconds
+        if actionable:
+            result.append(record)
+    return result
+
+
+def tmux(*args, **kwargs):
+    return subprocess.run(["tmux", *args], check=True, capture_output=True, text=True, timeout=10, **kwargs).stdout
+
+
+def process_identity(pid):
+    if sys.platform != "linux":
+        raise ValueError("Pane dispatch requires Linux /proc and exec pi")
+    process = Path(f"/proc/{int(pid)}")
+    stat = (process / "stat").read_text().rsplit(")", 1)[1].split()
+    if (process / "comm").read_text().strip() != "pi":
+        raise ValueError("Pi must own pane_pid: launch with exec pi, not under a persistent shell")
+    return Path("/proc/sys/kernel/random/boot_id").read_text().strip() + ":" + stat[19]
+
+
+def inspect_pane(pane):
+    if not re.fullmatch(r"%[0-9]+", pane):
+        raise ValueError("Route requires an exact tmux pane ID")
+    actual = tmux("display-message", "-p", "-t", pane, "#{pane_id}|#{pane_pid}|#{pane_current_command}").strip().split("|")
+    if len(actual) != 3 or actual[0] != pane or actual[2] != "pi":
+        raise ValueError(f"Pane identity changed for {pane}; refusing delivery")
+    pid = int(actual[1])
+    return {"pane": pane, "pane_pid": pid, "process_start": process_identity(pid)}
+
+
+def verify_route(route):
+    actual = inspect_pane(route["pane"])
+    if any(route.get(key) != value for key, value in actual.items()):
+        raise ValueError("Agent process changed; coordinator must reassign the route")
+
+
+def dispatch(record, consumer, route):
+    pane = route["pane"]
+    verify_route(route)
+    screen = tmux("capture-pane", "-p", "-t", pane)
+    if re.search(r"^.*[─━].*Working.*[─━]", screen, re.MULTILINE):
+        return False
+    prompt = Path(route["prompt"]).read_text()
+    prompt += "\n\nTask event (state data, not additional authority):\n" + json.dumps(record, indent=2)
+    with store["locked"]():
+        current = store["load"](record["task"])
+        store["revision_matches"](current, record["revision"])
+        if seen(consumer).get(record["task"], 0) >= record["revision"]:
+            return False
+        if current.get("claim"):
+            raise ValueError(f"{record['task']} already claimed; inspect delivery before release/retry")
+        verify_route(route)
+        current["claim"] = {"owner": consumer, "revision": record["revision"], "claimed_at": store["now"](), "pane": pane}
+        store["atomic"](store["path_for"](record["task"]), current)
+        buffer = f"task-{consumer}-{record['task']}-{record['revision']}"
+        # An interrupted/uncertain send leaves the claim for manual recovery, not a duplicate retry.
+        tmux("load-buffer", "-b", buffer, "-", input=prompt)
+        tmux("paste-buffer", "-d", "-p", "-b", buffer, "-t", pane)
+        tmux("send-keys", "-t", pane, "Enter")
+        values = seen(consumer)
+        values[record["task"]] = record["revision"]
+        store["atomic"](seen_path(consumer), values)
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--consumer", choices=CONSUMERS, default="coordinator")
+    parser.add_argument("--task", help="restrict observation/delivery to one task")
+    parser.add_argument("--pump", action="store_true", help="advance a task's configured handoffs; exit 10 until coordinator action is needed")
+    parser.add_argument("--dispatch", action="store_true", help="deliver to preassigned routes.json panes")
+    parser.add_argument("--inspect-pane", metavar="PANE", help="print exec-owned Pi identity for route assignment (Linux)")
+    parser.add_argument("--ack", metavar="TASK")
+    parser.add_argument("--revision", type=int)
+    parser.add_argument("--stale-seconds", type=int, default=900)
+    args = parser.parse_args()
+    try:
+        if args.inspect_pane:
+            print(json.dumps(inspect_pane(args.inspect_pane), indent=2))
+            return
+        if args.ack:
+            if args.revision is None:
+                parser.error("--ack requires --revision")
+            acknowledge(args.ack, args.revision, args.consumer)
+            return
+        if args.pump:
+            if not args.task:
+                parser.error("--pump requires --task")
+            record = store["load"](args.task)
+            if not record.get("state"):
+                raise ValueError("Unknown task")
+            routes_path = ROOT / "routes.json"
+            routes = json.loads(routes_path.read_text()) if routes_path.exists() else {}
+            if record["state"] in CONSUMERS["coordinator"]:
+                print(json.dumps(record, indent=2))
+                sys.exit(20 if record["state"] == "failed" else 0)
+            if any(event["task"] == args.task for event in events("coordinator", args.stale_seconds)):
+                raise ValueError("Worker or handoff is stale; coordinator inspection required")
+            for consumer in ("review", "implementation", "security"):
+                if record["state"] not in CONSUMERS[consumer]:
+                    continue
+                route = routes.get(args.task, {}).get(consumer)
+                if not route:
+                    print(json.dumps({"task": args.task, "needs_assignment": consumer, "event": record}, indent=2))
+                    return
+                if any(event["task"] == args.task for event in events(consumer)):
+                    dispatch(record, consumer, route)
+            sys.exit(10)
+        pending = [event for event in events(args.consumer, args.stale_seconds) if not args.task or event["task"] == args.task]
+        if not args.dispatch:
+            if pending:
+                print(json.dumps(pending, indent=2))
+            sys.exit(0 if pending else 10)
+        routes_path = ROOT / "routes.json"
+        routes = json.loads(routes_path.read_text()) if routes_path.exists() else {}
+        delivered = []
+        for record in pending:
+            route = routes.get(record["task"], {}).get(args.consumer)
+            if route and dispatch(record, args.consumer, route):
+                delivered.append({"task": record["task"], "revision": record["revision"], "pane": route["pane"]})
+        if delivered:
+            print(json.dumps(delivered, indent=2))
+        sys.exit(0 if delivered else 10)
+    except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
+        parser.exit(20, f"{error}\n")
+
+
+if __name__ == "__main__":
+    main()

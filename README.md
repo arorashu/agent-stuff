@@ -11,6 +11,8 @@ Skills, Pi extensions, and command-line tools for coding agents.
 | [article-html](skills/article-html/SKILL.md) | Save a public article as a self-contained HTML file. | Network access; `wl-paste` for clipboard input on Wayland. |
 | [async-monitor](skills/async-monitor/SKILL.md) | Run background work and receive completion notices. | The Pi `async-monitor` extension or `codex-monitor`. |
 | [launch-agents](skills/launch-agents/SKILL.md) | Start and manage Codex or Pi agents. | The selected agent CLI; tmux for interactive sessions. |
+| [task-handoffs](skills/task-handoffs/SKILL.md) | Coordinate assigned workers and reviewers with atomic state and exact-head approvals. | Python 3; an explicit `TASK_STATUS_DIR`; Linux, tmux, and Pi-owned panes for dispatch. |
+| [ui-proof-video](skills/ui-proof-video/SKILL.md) | Record and verify continuous video of UI changes. | Browser recording tools; FFmpeg and ffprobe; a connected Google Drive account for Drive delivery. |
 
 ### Pi extensions
 
@@ -65,7 +67,7 @@ The main installer requires Bash and standard Unix command-line tools. Install t
    ./install.sh
    ```
 
-The default installation includes all three skills, the five listed extensions, and `codex-monitor`. It does not include the optional launchers or OpenAI search extensions.
+The default installation includes all listed skills, the five listed extensions, and `codex-monitor`. It does not include the optional launchers or OpenAI search extensions.
 
 The installer shows the plan and asks for confirmation. Use `-y` to install without a prompt. This option is required when standard input is not a terminal.
 
