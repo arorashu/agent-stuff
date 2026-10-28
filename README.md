@@ -1,170 +1,105 @@
 # agent-stuff
 
-Reusable agent skills, Pi extensions, optional launchers, and the `codex-monitor` CLI in one repository.
+Skills, Pi extensions, and command-line tools for coding agents.
 
-This repository holds skill instructions, extension code, and a complete
-repo-relative `codex-monitor` package. Other external CLIs remain separate.
+## Contents
 
-## Pi with persistent memory
+### Skills
 
-[`mpi`](tools/mpi/README.md) launches Pi with OptMem instructions and a private,
-persistent memory store. Install it separately with
-`python3 tools/mpi/install.py`; requires Python 3.8+ and Pi. The installer
-downloads a pinned, checksum-verified OptMem script. Memories stay outside
-this repository. See the linked guide for setup on multiple machines.
-
-## Pi with automatic OptChat history
-
-[`opi`](tools/opi/README.md) is a separate Pi SDK launcher that automatically
-logs the conversation, summarizes it in a binary tree, and starts each turn
-from a bounded memory view, with the normal Pi terminal UI and a default of
-`openai-codex/gpt-6.1-sol`. Install with `python3 tools/opi/install.py`.
-Requires Node 22+, Python 3.8+, and the npm Pi 1.0.2 SDK. It makes background
-summarizer calls; see the guide for model selection, costs, caching and limits.
-`pi`, `mpi`, and `opi` remain separate commands with separate memory behavior.
-
-## Skills
-
-| Skill | Purpose | External dependency |
+| Skill | Purpose | Requirements |
 |---|---|---|
-| `article-html` | Turn a public web article into a self-contained reader HTML file with no banners or subscribe chrome | Network fetch (Jina reader first); clipboard `wl-paste` on this machine |
-| `async-monitor` | Register durable commands and asynchronous checks without polling from the agent | This repository's `async-monitor` Pi extension and/or `codex-monitor` package |
-| `launch-agents` | Choose and operate built-in, headless, or tmux-based Codex and Pi agents | The agent CLIs being used; tmux for interactive sessions |
-| `ui-proof-video` | Capture continuous UI proof with visible actions, captions, provenance, and delivery readback | Browser recording tools; FFmpeg/ffprobe; connected Google Drive for Drive delivery |
+| [article-html](skills/article-html/SKILL.md) | Save a public article as a self-contained HTML file. | Network access; `wl-paste` for clipboard input on Wayland. |
+| [async-monitor](skills/async-monitor/SKILL.md) | Run background work and receive completion notices. | The Pi `async-monitor` extension or `codex-monitor`. |
+| [launch-agents](skills/launch-agents/SKILL.md) | Start and manage Codex or Pi agents. | The selected agent CLI; tmux for interactive sessions. |
+| [ui-proof-video](skills/ui-proof-video/SKILL.md) | Record and verify continuous video of UI changes. | Browser recording tools; FFmpeg and ffprobe; a connected Google Drive account for Drive delivery. |
 
-## Pi extensions
+### Pi extensions
 
-| Extension | Purpose | Requirement |
+| Extension | Purpose |
+|---|---|
+| `async-monitor` | Run commands, periodic checks, and background Pi tasks. Deliver results to the session. |
+| [pi-deepseek-websearch](pi-extensions/pi-deepseek-websearch/README.md) | Add a `deepseek_search` tool. Requires a DeepSeek API key. |
+| `session-id-status.ts` | Show the session ID in the footer. |
+| `tps.ts` | Show the current and average generation speed. |
+| `work-timer.ts` | Show work duration and the local completion time. |
+
+These five extensions are available through `install.sh`. Pi must be installed separately.
+
+Two additional search extensions have separate setup instructions:
+
+- [pi-openai-search](pi-extensions/pi-openai-search/README.md): offer hosted search in the current OpenAI Codex request.
+- [pi-openai-websearch-tool](pi-extensions/pi-openai-websearch-tool/README.md): add an explicit `openai_search` tool that makes a separate request.
+
+Use only one OpenAI search extension at a time. Search queries go to the selected service provider.
+
+### Command-line tools
+
+| Tool | Purpose | Installation |
 |---|---|---|
-| `async-monitor` | Run durable commands, polling checks, and detached Pi tasks with automatic session delivery | Node.js; Pi |
-| `pi-deepseek-websearch` | Register a `deepseek_search` tool that runs DeepSeek's server-side web search | DeepSeek key (`/login` or `DEEPSEEK_API_KEY`); Pi |
-| `session-id-status` | Show the current session ID in Pi's default footer | Pi |
-| `tps` | Show current and session-average generation speed in Pi's footer | Pi |
-| `work-timer` | Show live/final work duration and a concise local completion time in Pi's UI | Pi |
+| [codex-monitor](codex-monitor/README.md) | Run background commands and periodic checks. Deliver results to a Codex thread. | Included in the default installation. Requires Node.js and a compatible Codex app-server. |
+| `codexr` | Start a Codex terminal session on a shared local app-server. | Optional: `./install.sh --codex-launcher`. |
+| [mpi](tools/mpi/README.md) | Start Pi with persistent, agent-written OptMem notes. | Separate: `python3 tools/mpi/install.py`. Requires Python 3.8+ and Pi. |
+| [opi](tools/opi/README.md) | Start Pi with automatic history storage and background summaries. | Separate: `python3 tools/opi/install.py`. Requires Node.js 22+, Python 3.8+, and a supported npm Pi SDK. |
 
-## Codex monitor
+`pi`, `mpi`, and `opi` remain separate commands. The memory launchers store data outside this repository. Read their guides for storage, privacy, and model-call costs.
 
-`codex-monitor` owns durable commands and polling checks, then delivers their
-terminal outcome into a Codex thread through an existing shared app-server.
-Its launcher and both `src/` dependencies live together under
-`codex-monitor/`; do not copy the launcher by itself.
+## Install
 
-The source was recovered from an untracked nix2 working tree with no Git
-history or configured remote, so its earlier commit provenance is unavailable.
+The main installer requires Bash and standard Unix command-line tools. Install the requirements for each selected component separately. Add `~/.local/bin` to your PATH to use installed commands.
 
-`codex-monitor doctor --deep` is a mutating protocol probe: it creates a test
-thread and turn on the selected app-server. Use plain `doctor` for read-only
-connectivity checks.
+1. Clone the repository:
 
-Set `CODEX_MONITOR_CODEX_BIN` to an explicit Codex executable when multiple
-installations coexist. The monitor uses that exact binary for `app-server
-proxy`; otherwise it resolves `codex` from `PATH`.
+   ```bash
+   git clone https://github.com/arorashu/agent-stuff.git
+   cd agent-stuff
+   ```
 
-Start the standalone-managed shared server and launch receiving TUIs against
-it explicitly. The monitor daemon must inherit the same executable selection:
+2. Review the installation plan:
 
-```bash
-standalone_codex="$HOME/.local/lib/codex-standalone-bin/codex"
-"$standalone_codex" app-server daemon start
-CODEX_MONITOR_CODEX_BIN="$standalone_codex" codex-monitor daemon start
-"$standalone_codex" --remote unix://
-```
+   ```bash
+   ./install.sh --dry-run
+   ```
 
-These commands are also the post-reboot startup procedure. A regular Codex
-session that was not launched with `--remote unix://` is not attached to this
-shared server and cannot receive monitor notifications live.
+3. Install the default components:
 
-`async-monitor` and `pi-deepseek-websearch` are directories (`index.ts`
-entrypoints). `session-id-status`, `tps`, and `work-timer` are single files.
-The installer accepts both forms.
+   ```bash
+   ./install.sh
+   ```
 
-## Install everything
+The default installation includes all listed skills, the five listed extensions, and `codex-monitor`. It does not include the optional launchers or OpenAI search extensions.
 
-```bash
-git clone https://github.com/arorashu/agent-stuff.git ~/Work/agent-stuff
-cd ~/Work/agent-stuff
-./install.sh
-```
+The installer shows the plan and asks for confirmation. Use `-y` to install without a prompt. This option is required when standard input is not a terminal.
 
-The installer prints a plan of what will be linked where and asks for
-confirmation. Pass `-y` to skip the prompt (required when stdin is not a
-terminal). `--dry-run` prints the plan and makes no changes.
+Pi links are created only if `~/.pi/agent` exists. Use `--pi` to create links for a new Pi setup. Use `--no-pi` to skip Pi links.
 
-With no `--skill` / `--extension`, every skill and extension is installed.
+### Select components
 
-Pi skill and extension links are created when `~/.pi/agent` already exists.
-Use `--pi` to create them on a new Pi setup, or `--no-pi` to skip Pi.
-
-## Install only some items
-
-You can copy files, or you can ask the installer for specific names.
-They do different things.
-
-### Copy (no clone needed afterwards)
-
-The repository is only a source of files. After the copy, you can delete
-it. Updates are manual.
-
-One skill:
-
-```bash
-mkdir -p ~/.agents/skills
-cp -r skills/article-html ~/.agents/skills/article-html
-```
-
-Pi extension examples (Pi must already exist):
-
-```bash
-mkdir -p ~/.pi/agent/extensions
-cp -r pi-extensions/async-monitor ~/.pi/agent/extensions/async-monitor
-cp pi-extensions/session-id-status.ts ~/.pi/agent/extensions/session-id-status.ts
-cp pi-extensions/tps.ts ~/.pi/agent/extensions/tps.ts
-cp pi-extensions/work-timer.ts ~/.pi/agent/extensions/work-timer.ts
-cp -r pi-extensions/pi-deepseek-websearch ~/.pi/agent/extensions/pi-deepseek-websearch
-```
-
-Optional Pi skill link after a shared-skill copy:
-
-```bash
-mkdir -p ~/.pi/agent/skills
-ln -s ~/.agents/skills/article-html ~/.pi/agent/skills/article-html
-```
-
-### Installer, specific names (symlink into this clone)
-
-The installer links into the clone. `git pull` in the clone updates the
-linked files. Moving the clone later breaks the links; rerun the installer
-from the new path.
-
-If you pass any `--skill` or `--extension`, **only** the named items are
-installed. You can combine and repeat selectors.
+If you use any component selector, the installer installs only the selected components. You can combine and repeat selectors.
 
 ```bash
 ./install.sh --skill article-html
 ./install.sh --skill async-monitor --skill launch-agents
 ./install.sh --extension session-id-status.ts
-./install.sh --extension tps.ts
-./install.sh --extension async-monitor
+./install.sh --extension async-monitor --extension work-timer.ts
 ./install.sh --extension pi-deepseek-websearch
-./install.sh --codex-monitor --backup-existing
+./install.sh --codex-monitor
 ./install.sh --codex-launcher
 ./install.sh --skill article-html --extension work-timer.ts -y
 ```
 
-Make does the same selection (`make help` lists the variables):
+Equivalent Make commands are available:
 
 ```bash
 make install SKILL=article-html
 make install SKILL="async-monitor launch-agents"
-make install EXTENSION=session-id-status.ts
-make install EXTENSION=tps.ts
-make install EXTENSION=pi-deepseek-websearch
-make install-skill NAME=launch-agents
-make install-extension NAME=tps.ts
-make install SKILL=async-monitor ARGS="--dry-run"
+make install EXTENSION=work-timer.ts
+make install SKILL=async-monitor DRY=1
+make help
 ```
 
-## What the installer links
+### Links, updates, and conflicts
+
+The installer creates symbolic links to this clone:
 
 ```text
 ~/.agents/skills/<name>        -> <clone>/skills/<name>
@@ -173,74 +108,104 @@ make install SKILL=async-monitor ARGS="--dry-run"
 ~/.local/bin/codex-monitor     -> <clone>/codex-monitor/bin/codex-monitor.mjs
 ```
 
-Current Codex builds discover `~/.agents/skills`, so the installer does
-not also link under `~/.codex/skills`.
+Keep the clone in place. Run `git pull` to update linked components. If you move the clone, run the installer again from the new location.
 
-## Opt-in shared-local Codex TUI launcher
+Codex uses `~/.agents/skills`. The installer does not create additional links under `~/.codex/skills`.
 
-`./install.sh --codex-launcher` (or `make install-codex-launcher`) installs
-`codexr`, `codex-direct`, and `codex-mise` under `~/.local/agent-bin`. **Plain
-`codex` stays native**, and existing personal aliases are not changed.
+The installer refuses to replace conflicting files or links. Use `--backup-existing` to move conflicts to timestamped backup directories before installation. This also handles duplicate skills under `~/.codex/skills`.
 
 ```bash
-codexr                                    # shared local TUI
-codexr -- -m MODEL -c model_reasoning_effort=high 'fix it'
-codexr -- resume --last
-codexr -- fork --last
-codexr -- agents
-codexr --help                             # wrapper help, no daemon startup
-codexr -- resume --help                    # native help, no daemon startup
-```
-
-`codexr` runs the standalone `app-server daemon start` and `codex-monitor daemon
-start` commands (both idempotent), then connects via `--remote unix://`. It never
-restarts services or alters approval/sandbox defaults. Install the monitor
-separately with `./install.sh --codex-monitor` if needed. The standalone binary
-must support `--remote` and `app-server daemon start`.
-
-The interface is deliberately narrow: all native **interactive TUI** arguments
-must follow the wrapper's `--`. Use native `codex` for noninteractive commands.
-Before a second, native `--`, `--remote`, `--remote-auth-token-env` (including
-`=value` forms), and `--no-daemon` are reserved and rejected, even after
-`resume`/`fork` or when used as option values. Use native `codex` for those
-options; the launcher never silently overrides them. Native help/version flags
-before that terminator pass through without starting either daemon. Use a
-native `--` when a prompt is literally a reserved flag:
-`codexr -- -- --remote`.
-
-The direct/Mise helpers retain explicit executable selection for existing users:
-`codex-direct` invokes `~/.local/lib/codex-standalone-bin/codex`, whereas
-`codex-mise` invokes `/usr/bin/mise x codex -- codex ...`, without PATH recursion.
-Tests can override these with `CODEX_LAUNCHER_STANDALONE_BIN`,
-`CODEX_LAUNCHER_MONITOR_BIN`, and `CODEX_LAUNCHER_MISE_BIN`.
-
-The installer appends an idempotent source hook after Omarchy/Mise initialization
-in `~/.bashrc`, backing up that file before modification. The hook moves
-agent-bin to the front of PATH and removes duplicate entries. `AGENT_BIN_DIR`
-and `BASHRC_FILE` override the install destinations (keep `AGENT_BIN_DIR` set
-when sourcing the hook for a custom directory). An obsolete `agent-bin/codex`
-link is backed up **only** if it points exactly to this repo's former launcher;
-an unrelated `codex` there blocks installation and is left untouched. Existing
-hooks and helper links are retained. No services or phone pairing are changed.
-This selector is opt-in, not part of the default installation.
-
-The installer never overwrites existing files or links. Conflicts —
-including same-named copies under `~/.codex/skills` — can be moved aside
-with `--backup-existing`. Backups go to timestamped `skill-backups/` or
-`extension-backups/` siblings, outside the active directories.
-
-```bash
-./install.sh --backup-existing
 ./install.sh --dry-run --backup-existing
+./install.sh --backup-existing
 ```
 
-Exit codes: `0` applied / no-op / declined / dry-run; `1` operational
-failure (conflict without `--backup-existing`, or confirmation needed on
-non-terminal stdin); `2` invocation error (unknown option or item).
+Backups are stored outside the active skill, extension, or executable directory.
 
-An existing monitor launcher can likewise be moved to a timestamped
-`~/.local/bin-backups/` directory with `--backup-existing`.
+Installer exit codes:
 
-`make test` runs a hermetic suite in temp directories. It never touches
-real agent directories. It requires Bash and [Bun](https://bun.sh/) to execute
-the TypeScript extension behavior tests.
+| Code | Meaning |
+|---|---|
+| `0` | Installation completed, no change was needed, the user declined, or the dry run completed. |
+| `1` | Installation failed. Examples: a file conflict or a required confirmation was unavailable. |
+| `2` | An option or component name was invalid. |
+
+### Copy files instead of creating links
+
+You can copy a component if you do not want to keep the clone. Updates to copied files are manual.
+
+```bash
+mkdir -p ~/.agents/skills
+cp -r skills/article-html ~/.agents/skills/article-html
+
+mkdir -p ~/.pi/agent/extensions
+cp pi-extensions/work-timer.ts ~/.pi/agent/extensions/work-timer.ts
+cp -r pi-extensions/async-monitor ~/.pi/agent/extensions/async-monitor
+```
+
+For Pi to use the copied skill, also create its skill link:
+
+```bash
+mkdir -p ~/.pi/agent/skills
+ln -s ~/.agents/skills/article-html ~/.pi/agent/skills/article-html
+```
+
+Copy the complete `codex-monitor/` directory if you install that tool manually. Its executable requires the modules in `src/`.
+
+## Use Codex monitor
+
+Start the shared app-server and the monitor daemon. Then connect the receiving Codex session:
+
+```bash
+codex app-server daemon start
+codex-monitor daemon start
+codex --remote unix://
+```
+
+Repeat the daemon start commands after a reboot. A Codex session must connect to the shared server to receive live monitor notices.
+
+If you have multiple Codex installations, set `CODEX_MONITOR_CODEX_BIN` to the executable that owns the shared server.
+
+**Warning:** `codex-monitor doctor --deep` creates a test thread and turn. Use plain `codex-monitor doctor` for a read-only connection check.
+
+See the [Codex monitor guide](codex-monitor/README.md) for commands and delivery limits.
+
+## Use the optional Codex launcher
+
+Install both the launcher and monitor if you need them:
+
+```bash
+./install.sh --codex-launcher --codex-monitor
+```
+
+Open a new Bash session to load the PATH change. Then run:
+
+```bash
+codexr
+codexr -- -m MODEL 'Describe this project'
+codexr -- resume --last
+codexr --help
+```
+
+Replace `MODEL` with an available model ID. Put native interactive Codex arguments after the wrapper's `--`.
+
+`codexr` starts the local app-server and monitor daemons, then connects with `--remote unix://`. It does not change approval or sandbox settings. Use native `codex` for noninteractive commands, explicit remote connections, or `--no-daemon`.
+
+By default, the launcher uses `~/.local/lib/codex-standalone-bin/codex`. Set `CODEX_LAUNCHER_STANDALONE_BIN` to use another compatible executable. It must support `--remote` and `app-server daemon start`. Set `CODEX_LAUNCHER_MONITOR_BIN` if the monitor is not at `~/.local/bin/codex-monitor`.
+
+The launcher installer adds `codexr`, `codex-direct`, and `codex-mise` under `~/.local/agent-bin`. It backs up `~/.bashrc` before adding a PATH setup line. Plain `codex` remains unchanged.
+
+`codex-direct` uses the default standalone executable path. `codex-mise` runs Codex through `/usr/bin/mise`. Set `AGENT_BIN_DIR` or `BASHRC_FILE` to change the installation destinations.
+
+## Test
+
+```bash
+make test
+```
+
+The main suite uses temporary directories. It does not modify your agent configuration. It requires Bash, Python 3, and [Bun](https://bun.sh/).
+
+Component guides describe additional tests and requirements. Run `make test-opi` for the OptChat tests with a supported Pi SDK.
+
+## License
+
+[MIT](LICENSE).
